@@ -1,0 +1,5 @@
+node_modules/
+storage/datasets/
+storage/key_value_stores/
+*.log
+.DS_Store

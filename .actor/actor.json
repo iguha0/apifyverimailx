@@ -1,0 +1,12 @@
+{
+    "actorSpecification": 1,
+    "name": "email-verifier",
+    "title": "Email Verifier",
+    "description": "Validates email addresses through regex, DNS/MX, and simulated SMTP handshake.",
+    "version": "0.0.1",
+    "meta": {
+        "template": "empty"
+    },
+    "input": "./INPUT_SCHEMA.json",
+    "dockerfile": "../Dockerfile"
+}
