@@ -3,7 +3,7 @@
     "name": "email-verifier",
     "title": "Email Verifier",
     "description": "Validates email addresses via the Verimailx /bulk-validate API (syntax, DNS/MX, SMTP, disposable, role-based).",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "buildTag": "latest",
     "meta": {
         "template": "empty"
@@ -11,6 +11,10 @@
     "input": "./INPUT_SCHEMA.json",
     "dockerfile": "../Dockerfile",
     "readme": "../README.md",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
     "environmentVariables": {
         "APIFY-VERIMAILX-API-KEY": ""
     }

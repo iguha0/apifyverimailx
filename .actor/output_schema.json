@@ -1,0 +1,13 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Email Verifier output",
+    "description": "One record per email address with the Verimailx verdict, deliverability score, syntax/MX/SMTP checks, and disposable/role-based flags.",
+    "properties": {
+        "results": {
+            "type": "string",
+            "title": "Verified emails",
+            "description": "Per-email verification results. One item per address submitted in the input.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        }
+    }
+}
