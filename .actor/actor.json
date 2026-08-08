@@ -3,18 +3,15 @@
     "name": "email-verifier",
     "title": "Email Verifier",
     "description": "Validates email addresses via the Verimailx /bulk-validate API (syntax, DNS/MX, SMTP, disposable, role-based).",
-    "version": "0.0.2",
+    "version": "0.0.3",
+    "buildTag": "latest",
     "meta": {
         "template": "empty"
     },
     "input": "./INPUT_SCHEMA.json",
     "dockerfile": "../Dockerfile",
-    "environmentVariables": [
-        {
-            "name": "APIFY-VERIMAILX-API-KEY",
-            "description": "Verimailx API key (starts with vk_). Generate one at https://api.verimailx.com and paste it into the Apify console under Secrets.",
-            "isSecret": true,
-            "isRequired": true
-        }
-    ]
+    "readme": "../README.md",
+    "environmentVariables": {
+        "APIFY-VERIMAILX-API-KEY": ""
+    }
 }

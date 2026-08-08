@@ -1,6 +1,6 @@
 {
     "name": "email-verifier",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "type": "module",
     "description": "Apify actor that validates email addresses via the Verimailx /bulk-validate API (syntax, DNS/MX, SMTP, disposable, role-based).",
     "main": "src/main.js",

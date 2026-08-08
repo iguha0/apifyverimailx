@@ -1,13 +1,13 @@
 {
     "title": "Email Verifier Input",
-    "description": "Provide a list of email addresses to validate through regex, DNS/MX, and SMTP handshake.",
+    "description": "Provide a list of email addresses to validate via the Verimailx /bulk-validate API. The API key is configured separately as the APIFY-VERIMAILX-API-KEY environment variable in the Apify console.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "emails": {
             "title": "Emails to verify",
             "type": "array",
-            "description": "Array of email address strings.",
+            "description": "Array of email address strings. Duplicates are removed; batches larger than 1,000 are split into multiple API calls.",
             "editor": "stringList",
             "items": {
                 "type": "string"
