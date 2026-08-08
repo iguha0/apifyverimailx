@@ -1,10 +1,21 @@
 # Email Verifier — Apify Actor
 
-Validates email addresses using three checks, in order:
+Validates email addresses by calling the [Verimailx](https://api.verimailx.com) `/bulk-validate` API. Verimailx runs each address through:
 
 1. **Regex syntax check** — local-part + domain structure
 2. **DNS MX record lookup** — does the domain accept email?
-3. **Simulated SMTP handshake** — dial the primary MX server, send `EHLO` → `MAIL FROM` → `RCPT TO` → `QUIT`, capture every server reply
+3. **SMTP validation** — does the mail server accept the address?
+4. **Disposable / role-based detection** — flags throwaway and role mailboxes
+
+Emails are sent in batches of up to 1,000 per request, with duplicates de-duplicated before submission.
+
+## Environment variables
+
+| Name                     | Required | Description                                                                                  |
+|--------------------------|----------|----------------------------------------------------------------------------------------------|
+| `APIFY-VERIMAILX-API-KEY`| yes      | Verimailx API key (starts with `vk_`). Set it in the Apify console under **Secrets**.       |
+
+The actor exits with an error if this variable is missing.
 
 ## Input
 
@@ -52,28 +63,23 @@ Validates email addresses using three checks, in order:
 
 ### Overall verdict
 
-| Verdict   | Condition                                                                            |
-|-----------|--------------------------------------------------------------------------------------|
-| `valid`   | Syntax ✓, MX ✓, **SMTP explicitly accepted** the recipient                            |
-| `invalid` | Any of: bad syntax, no MX records, SMTP replied 5xx (recipient rejected), input error |
-| `unknown` | Syntax + MX pass, but SMTP timed out, returned a 4xx (transient), or errored          |
+The actor exposes a 3-state verdict (`valid` / `invalid` / `unknown`) plus the raw Verimailx result and deliverability score, so consumers can distinguish between risky and unknown if needed:
 
-Most real-world mail servers (Gmail, Outlook, Yahoo, corporate) reject
-unauthenticated probes with `4xx Relay access denied` — so `unknown` is
-the **most common production outcome** for legitimate-looking addresses.
-This is by design: the SMTP step is best treated as "did the server
-respond sensibly", not a definitive deliverability verdict.
+| Actor `overall` | Verimailx `result` | Notes                                                       |
+|-----------------|--------------------|-------------------------------------------------------------|
+| `valid`         | `valid`            | Email is deliverable and safe to send.                     |
+| `invalid`       | `invalid`          | Email does not exist or cannot receive mail.               |
+| `unknown`       | `risky`            | Disposable, role-based, or catch-all — treat with caution. |
+| `unknown`       | `unknown`          | Server timeout or ambiguous response.                      |
 
 ## Local development
 
 ```bash
 npm install
-node test.js              # run unit tests (syntax)
-node src/main.js          # run the actor
+APIFY-VERIMAILX-API-KEY=vk_your_api_key node src/main.js   # run the actor locally
 ```
 
-The actor reads from `storage/key_value_stores/default/INPUT.json` when
-running locally and writes per-email results to `storage/datasets/default/`.
+Set `APIFY-VERIMAILX-API-KEY` in your shell before running. The actor reads from `storage/key_value_stores/default/INPUT.json` when running locally and writes per-email results to `storage/datasets/default/`.
 
 ## Deploy to Apify
 
