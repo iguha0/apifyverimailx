@@ -1,15 +1,16 @@
 {
     "actorSpecification": 1,
     "title": "Email Verifier dataset",
-    "description": "One item per validated email. Mirrors the Verimailx /bulk-validate response, reshaped for the actor's three-state overall verdict.",
+    "description": "One item per validated email. Mirrors the Verimailx /bulk-validate response, reshaped for the actor's three-state overall verdict. In syntax-only mode (no API key), mx/smtp/flags fields are null because those checks were not performed.",
     "fields": {
         "type": "object",
-        "required": ["email", "overall", "result", "syntax", "mx", "smtp", "checkedAt"],
+        "required": ["email", "overall", "result", "validationMode", "syntax", "mx", "smtp", "checkedAt"],
         "properties": {
             "email":                { "type": "string",  "title": "Email" },
             "overall":              { "type": "string",  "title": "Overall",     "description": "Actor verdict: valid | invalid | unknown | error", "enum": ["valid", "invalid", "unknown", "error"] },
             "result":               { "type": "string",  "title": "Verimailx",   "description": "Raw Verimailx verdict: valid | invalid | risky | unknown", "enum": ["valid", "invalid", "risky", "unknown"] },
             "deliverabilityScore":  { "type": ["integer", "null"], "title": "Score", "description": "Verimailx deliverability score (0-100), or null if unavailable" },
+            "validationMode":       { "type": "string",  "title": "Mode",        "description": "Validation depth: 'full' = Verimailx API call made, 'syntax-only' = local RFC syntax check only (no API key configured)", "enum": ["full", "syntax-only"] },
             "syntax": {
                 "type": "object",
                 "title": "Syntax",
@@ -21,8 +22,8 @@
                 "type": "object",
                 "title": "MX",
                 "properties": {
-                    "passed":  { "type": "boolean",            "title": "Passed" },
-                    "domain":  { "type": "string",             "title": "Domain" },
+                    "passed":  { "type": ["boolean", "null"],     "title": "Passed" },
+                    "domain":  { "type": "string",                 "title": "Domain" },
                     "records": {
                         "type": "array",
                         "title": "MX records",
@@ -40,17 +41,17 @@
                 "type": "object",
                 "title": "SMTP",
                 "properties": {
-                    "passed":   { "type": "boolean", "title": "Passed" },
-                    "rejected": { "type": "boolean", "title": "Rejected" }
+                    "passed":   { "type": ["boolean", "null"], "title": "Passed" },
+                    "rejected": { "type": ["boolean", "null"], "title": "Rejected" }
                 }
             },
             "flags": {
                 "type": "object",
                 "title": "Flags",
                 "properties": {
-                    "dnsValid":  { "type": "boolean", "title": "DNS valid" },
-                    "disposable":{ "type": "boolean", "title": "Disposable" },
-                    "roleBased": { "type": "boolean", "title": "Role-based" }
+                    "dnsValid":  { "type": ["boolean", "null"], "title": "DNS valid" },
+                    "disposable":{ "type": ["boolean", "null"], "title": "Disposable" },
+                    "roleBased": { "type": ["boolean", "null"], "title": "Role-based" }
                 }
             },
             "error":     { "type": ["string", "null"], "title": "Error" },
@@ -61,7 +62,7 @@
         "overview": {
             "title": "Verification results",
             "transformation": {
-                "fields": ["email", "overall", "result", "deliverabilityScore", "syntax.passed", "mx.passed", "smtp.passed", "flags.disposable", "flags.roleBased", "checkedAt"]
+                "fields": ["email", "overall", "result", "deliverabilityScore", "validationMode", "syntax.passed", "mx.passed", "smtp.passed", "flags.disposable", "flags.roleBased", "checkedAt"]
             },
             "display": {
                 "component": "table",
@@ -70,6 +71,7 @@
                     { "field": "overall",             "label": "Overall" },
                     { "field": "result",              "label": "Verimailx" },
                     { "field": "deliverabilityScore", "label": "Score" },
+                    { "field": "validationMode",      "label": "Mode" },
                     { "field": "syntax.passed",       "label": "Syntax" },
                     { "field": "mx.passed",           "label": "MX" },
                     { "field": "smtp.passed",         "label": "SMTP" },
