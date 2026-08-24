@@ -1,19 +1,19 @@
 {
     "title": "Email Verifier Input",
-    "description": "Provide a list of email addresses to validate via the Verimailx /bulk-validate API. The API key is configured separately as the APIFY-VERIMAILX-API-KEY environment variable in the Apify console.",
+    "description": "Provide a list of email addresses to validate via the Verimailx /bulk-validate API. The API key is configured separately as the APIFY-VERIMAILX-API-KEY environment variable in the Apify console. If the API key is not set, the Actor falls back to local syntax-only validation so it can still produce a usable result.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "emails": {
             "title": "Emails to verify",
             "type": "array",
-            "description": "Array of email address strings. Duplicates are removed; batches larger than 1,000 are split into multiple API calls.",
+            "description": "Array of email address strings. Duplicates are removed; batches larger than 1,000 are split into multiple API calls. If the Verimailx API key is not configured, the Actor falls back to local syntax-only validation.",
             "editor": "stringList",
-            "items": {
-                "type": "string"
-            },
-            "minItems": 1
+            "items": { "type": "string" },
+            "minItems": 1,
+            "default": [ "[email protected]" ]
         }
     },
-    "required": ["emails"]
+    "required": [ "emails" ],
+    "prefill": [ { "emails": [ "[email protected]" ] } ]
 }
