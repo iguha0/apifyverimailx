@@ -29,6 +29,8 @@ Every email you submit is checked across five dimensions:
 4. **SMTP handshake** — the receiving server confirms the address exists
 5. **Disposable / role-based / catch-all detection** — flags throwaway inboxes, role mailboxes (info@, admin@), and catch-all domains
 
+> **No API key?** If `APIFY-VERIMAILX-API-KEY` isn't configured, the Actor automatically falls back to **syntax-only validation** and reports `validationMode: "syntax-only"` in every output record. MX / SMTP / disposable / role-based fields are returned as `null` in that mode. Set the secret in the Apify console to unlock the full five-dimension check.
+
 Each address gets one of these verdicts:
 
 | Verdict | Meaning |
@@ -94,14 +96,15 @@ One structured record per email, pushed to the run's default dataset. Export as 
 | `email` | string | The address you submitted |
 | `overall` | string | `valid` / `invalid` / `risky` / `unknown` / `error` |
 | `result` | string | Raw Verimailx verdict: `valid` / `invalid` / `risky` / `unknown` |
-| `deliverabilityScore` | number | 0–100 confidence score from Verimailx |
+| `deliverabilityScore` | number | 0–100 confidence score from Verimailx (null in syntax-only mode) |
+| `validationMode` | string | `full` when Verimailx was called, `syntax-only` when only local RFC checks ran |
 | `syntax.passed` | bool | RFC-compliant structure |
-| `mx.passed` | bool | Domain has usable MX records |
+| `mx.passed` | bool / null | Domain has usable MX records (null in syntax-only mode) |
 | `mx.records` | array | Sorted MX records (lowest priority first) |
-| `smtp.passed` | bool | Receiving server confirmed the address |
-| `flags.disposable` | bool | Throwaway / temp-mail provider |
-| `flags.roleBased` | bool | Generic role (info@, support@, admin@) |
-| `flags.dnsValid` | bool | Domain resolves in DNS |
+| `smtp.passed` | bool / null | Receiving server confirmed the address (null in syntax-only mode) |
+| `flags.disposable` | bool / null | Throwaway / temp-mail provider |
+| `flags.roleBased` | bool / null | Generic role (info@, support@, admin@) |
+| `flags.dnsValid` | bool / null | Domain resolves in DNS |
 | `checkedAt` | string | ISO 8601 timestamp |
 
 ---
@@ -210,6 +213,12 @@ A: Yes — Verimailx handles both. Submit `[email protected]` or `[email protect
 ---
 
 ## Changelog
+
+### 0.0.5 — Apify QA hardening
+- Added `default` and `prefill` to the input schema so the Apify Store automated test always has a valid email to validate.
+- When `APIFY-VERIMAILX-API-KEY` is not set, the Actor now falls back to **local syntax-only validation** instead of failing. This means the Actor produces a useful result (and passes the QA test) even without credentials.
+- Output records now include a `validationMode` field (`full` or `syntax-only`) so consumers can tell which checks were actually performed.
+- `mx.passed`, `smtp.passed`, and the `flags.*` fields are now nullable in the dataset schema to reflect the syntax-only path.
 
 ### 0.0.4 — Schema release
 - Added `output_schema.json` and `dataset_schema.json` for proper Apify Output tab rendering.
