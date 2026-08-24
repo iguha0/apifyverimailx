@@ -14,6 +14,5 @@
             "default": [ "[email protected]" ]
         }
     },
-    "required": [ "emails" ],
-    "prefill": [ { "emails": [ "[email protected]" ] } ]
+    "required": [ "emails" ]
 }
