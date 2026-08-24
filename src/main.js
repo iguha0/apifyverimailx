@@ -14,6 +14,14 @@ const VERIMAILX_BASE = 'https://api.verimailx.com';
 const BULK_ENDPOINT = `${VERIMAILX_BASE}/bulk-validate`;
 const BULK_MAX = 1000;
 
+// RFC-5322-ish email syntax check. Mirrors the regex used in test.js so the
+// local "syntax-only" path agrees with the unit tests.
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+
+function isValidSyntax(email) {
+    return typeof email === 'string' && EMAIL_REGEX.test(email.trim());
+}
+
 // Map Verimailx result values to the actor's existing overall verdict.
 function mapResult(value) {
     if (value === 'valid') return 'valid';
@@ -49,6 +57,26 @@ function toActorResult(item) {
             disposable: Boolean(item.is_disposable),
             roleBased: Boolean(item.is_role_based),
         },
+        validationMode: 'full',
+        checkedAt: new Date().toISOString(),
+    };
+}
+
+// Build a syntax-only result for an email when no API key is configured.
+// MX / SMTP / flags are null because those checks were not performed.
+function toSyntaxOnlyResult(email) {
+    const passes = isValidSyntax(email);
+    const domain = email.includes('@') ? email.split('@').pop().toLowerCase() : '';
+    return {
+        email,
+        overall: passes ? 'unknown' : 'invalid',
+        result: passes ? 'unknown' : 'invalid',
+        deliverabilityScore: null,
+        syntax: { passed: passes },
+        mx: { passed: null, domain, records: [] },
+        smtp: { passed: null, rejected: null },
+        flags: { dnsValid: null, disposable: null, roleBased: null },
+        validationMode: 'syntax-only',
         checkedAt: new Date().toISOString(),
     };
 }
@@ -88,11 +116,13 @@ function chunk(array, size) {
 async function main() {
     await Actor.init();
 
+    // API key is optional. Without it we fall back to syntax-only validation
+    // so the actor still produces useful output (and passes Apify's QA test,
+    // which does not provide credentials).
     const apiKey = process.env[API_KEY_ENV];
-    if (!apiKey) {
-        log.error(`${API_KEY_ENV} environment variable is required. Set it in the Apify console (Secrets).`);
-        await Actor.exit(1);
-        return;
+    const hasApiKey = Boolean(apiKey);
+    if (!hasApiKey) {
+        log.warning(`${API_KEY_ENV} is not set. Falling back to syntax-only validation. Configure the secret in the Apify console for full Verimailx checks.`);
     }
 
     let input;
@@ -120,14 +150,28 @@ async function main() {
         return;
     }
 
+    const validationMode = hasApiKey ? 'full' : 'syntax-only';
     const batches = chunk(emails, BULK_MAX);
-    log.info(`Verifying ${emails.length} email(s) across ${batches.length} batch(es) of up to ${BULK_MAX}...`);
+    log.info(`Verifying ${emails.length} email(s) across ${batches.length} batch(es) of up to ${BULK_MAX} (${validationMode} mode)...`);
 
     let successCount = 0;
     let errorCount = 0;
 
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
         const batch = batches[batchIndex];
+
+        // Syntax-only path: no API calls, push local validation for each email.
+        if (!hasApiKey) {
+            for (const email of batch) {
+                const result = toSyntaxOnlyResult(email);
+                await Actor.pushData(result);
+                log.info(`${result.email} -> ${result.overall} (${validationMode})`);
+                successCount += 1;
+            }
+            continue;
+        }
+
+        // Full path: call Verimailx /bulk-validate.
         try {
             const payload = await callBulk(batch, apiKey);
             const results = payload.results;
@@ -152,6 +196,9 @@ async function main() {
                 await Actor.pushData({
                     email,
                     overall: 'error',
+                    result: 'unknown',
+                    deliverabilityScore: null,
+                    validationMode,
                     error: error?.message ?? String(error),
                     checkedAt: new Date().toISOString(),
                 });
