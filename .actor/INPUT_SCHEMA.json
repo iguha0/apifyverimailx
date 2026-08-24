@@ -11,7 +11,8 @@
             "editor": "stringList",
             "items": { "type": "string" },
             "minItems": 1,
-            "default": [ "[email protected]" ]
+            "default": [ "[email protected]" ],
+            "prefill": [ "[email protected]" ]
         }
     },
     "required": [ "emails" ]
