@@ -490,13 +490,22 @@ async function main() {
     log.info(`Job ${job.job_id} accepted: ${job.total ?? emails.length} address(es), ${job.credits_used ?? '?'} credit(s) reserved, ${job.credits_remaining ?? '?'} remaining.`);
     log.info('Verification runs server-side. This Actor polls until it finishes — no need to keep anything open.');
 
+    // Always poll the documented public endpoint, built from the job id.
+    //
+    // The submit response carries its own `status_url`, and following it is the
+    // obvious thing to do — but in practice that field has come back pointing at
+    // an internal host over plain http, which is unroutable from here and is not
+    // something any API consumer should be handed. The public base is documented
+    // and stable, so it is the safer source of truth. A mismatch is logged rather
+    // than followed, so the leak stays visible without breaking the run.
+    const statusUrl = `${BULK_ENDPOINT}?job_id=${encodeURIComponent(job.job_id)}`;
+    if (job.status_url && !String(job.status_url).startsWith(VERIMAILX_BASE)) {
+        log.warning(`The API returned status_url "${job.status_url}", which is not on ${VERIMAILX_BASE}. Ignoring it and polling the documented endpoint instead.`);
+    }
+
     let final;
     try {
-        final = await pollJob(
-            job.status_url ?? `${BULK_ENDPOINT}?job_id=${encodeURIComponent(job.job_id)}`,
-            apiKey,
-            job.job_id,
-        );
+        final = await pollJob(statusUrl, apiKey, job.job_id);
     } catch (err) {
         log.error(err.message);
         for (const email of emails) await safePush(toErrorResult(email, err.message, 'full'));
