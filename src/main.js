@@ -45,13 +45,17 @@ function isValidSyntax(email) {
     return typeof email === 'string' && EMAIL_REGEX.test(email.trim());
 }
 
-// Map Verimailx result values to the actor's existing overall verdict.
+// Map Verimailx result values to the actor's overall verdict.
 function mapResult(value) {
     if (value === 'valid') return 'valid';
     if (value === 'invalid') return 'invalid';
-    // 'risky' and 'unknown' both fall through to 'unknown' for the actor's
-    // three-state verdict. Verimailx's deliverability_score is preserved
-    // on the result so consumers can distinguish risky vs unknown if needed.
+    // A catch-all domain accepts mail for any address, so an individual mailbox
+    // behind one cannot be confirmed — that is 'risky', not 'unknown'. Flattening
+    // it to 'unknown' threw away the single most useful signal this Actor has,
+    // and it is the distinction that decides whether an address is safe to send
+    // to. Disposable and role-based mailboxes are risky for the same reason.
+    if (value === 'catch_all' || value === 'catch-all' || value === 'risky'
+        || value === 'disposable' || value === 'role_based') return 'risky';
     return 'unknown';
 }
 
