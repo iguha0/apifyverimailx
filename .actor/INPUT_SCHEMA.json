@@ -1,13 +1,13 @@
 {
     "title": "Bulk Email Verifier Input",
-    "description": "Give the Actor addresses in whichever form you already have them: a single address, a pasted list, a link to a CSV or TXT file, or the ID of an existing Apify dataset. You can combine sources — everything is merged and de-duplicated before verification.",
+    "description": "Give the Actor addresses in whichever form you already have them: a single address, a pasted list, a link to a CSV or TXT file, or the ID of an existing Apify dataset. You can combine sources \u2014 everything is merged and de-duplicated before verification.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "emails": {
             "title": "Email addresses",
             "type": "array",
-            "description": "Paste or type the addresses to verify. Duplicates are removed automatically, and lists longer than 1,000 are split into batches for you.",
+            "description": "Paste or type the addresses to verify. Duplicates are removed automatically, and long lists are split into small batches and processed in sequence.",
             "editor": "stringList",
             "items": {
                 "type": "string"
@@ -26,14 +26,14 @@
         "emailFileUrl": {
             "title": "Link to a CSV or TXT file",
             "type": "string",
-            "description": "A public link to a .csv or .txt file containing your list — a Google Sheets CSV export, an S3 object, a Dropbox direct link. Every address in the file is picked up regardless of which column it sits in, so you can upload your export untouched. Maximum 10 MB.",
+            "description": "A public link to a .csv or .txt file containing your list \u2014 a Google Sheets CSV export, an S3 object, a Dropbox direct link. Every address in the file is picked up regardless of which column it sits in, so you can upload your export untouched. Maximum 10 MB.",
             "editor": "textfield",
             "example": "https://example.com/my-list.csv"
         },
         "datasetId": {
             "title": "Apify dataset ID",
             "type": "string",
-            "description": "Verify the addresses inside a dataset produced by another Actor — chain this straight onto a scraper without exporting anything in between.",
+            "description": "Verify the addresses inside a dataset produced by another Actor \u2014 chain this straight onto a scraper without exporting anything in between.",
             "editor": "textfield",
             "sectionCaption": "Verify the output of another Actor",
             "sectionDescription": "Point this Actor at a dataset another run has already produced."
@@ -48,11 +48,11 @@
         "batchSize": {
             "title": "Addresses per request",
             "type": "integer",
-            "description": "How many addresses to verify in a single upstream request. The default of 20 is tuned to finish comfortably inside the verification service's time limit. Raise it only if your lists are unusually fast to verify; a batch that times out is split in half and retried automatically either way.",
+            "description": "How many addresses to verify in a single upstream request. The default of 10 is tuned to finish comfortably inside the verification service's 150-second limit \u2014 measured against a mixed list, an address costs about seven seconds. A batch that times out anyway is split in half and retried automatically.",
             "editor": "number",
-            "default": 20,
+            "default": 10,
             "minimum": 1,
-            "maximum": 40,
+            "maximum": 25,
             "sectionCaption": "Advanced"
         }
     },
