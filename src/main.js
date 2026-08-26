@@ -99,54 +99,38 @@ function toNumber(value) {
     return Number.isFinite(n) ? Math.round(n) : null;
 }
 
-// Turn one row of the results CSV into a dataset record. Header names are read
-// defensively — the whole row is also attached as `raw` so nothing is lost if a
-// column is named differently than expected.
+// Turn one row of the results CSV into a dataset record.
+//
+// The results file uses Title Case headers, and two of its columns are not
+// booleans: "Role Detected" carries the role name ("support") and
+// "Disposable Provider" carries the provider name ("temporary-mail"), each
+// empty when it does not apply. There is no catch-all column — that lives in
+// the Result value.
 function rowToActorResult(row) {
     const email = String(pick(row, 'Email', 'email address', 'address') ?? '').trim().toLowerCase();
-    const verdict = pick(row, 'Result', 'status', 'verdict');
-    const domain = email.includes('@') ? email.split('@').pop() : '';
+    const verdict = String(pick(row, 'Result', 'status') ?? 'unknown');
+    const verdictKey = verdict.toLowerCase().replace(/[^a-z]/g, '');
 
-    const verdictKey = String(verdict ?? '').toLowerCase().replace(/[^a-z]/g, '');
-    const disposable = toBool(pick(row, 'Disposable Provider', 'is disposable'));
-    const roleBased = toBool(pick(row, 'Role Detected', 'is role based'));
+    const roleName = pick(row, 'Role Detected', 'role');
+    const disposableProvider = pick(row, 'Disposable Provider', 'disposable');
 
-    // The results file carries no catch-all column even though the job summary
-    // counts catch_all separately, so it is read off the verdict instead.
-    const catchAllColumn = toBool(pick(row, 'Catch All', 'is catch all'));
-    const catchAll = catchAllColumn ?? (verdictKey === 'catchall' ? true : null);
-
-    // A flag counts as risky even when the verdict column doesn't say so.
-    let overall = mapResult(verdict);
-    if (overall === 'valid' && (catchAll === true || disposable === true || roleBased === true)) {
-        overall = 'risky';
-    }
-
-    const mxRaw = pick(row, 'MX Hosts', 'mx records', 'mx');
-    const records = typeof mxRaw === 'string' && mxRaw.trim()
-        ? mxRaw.split(/[;|,]/).map((h) => ({ exchange: h.trim(), priority: null })).filter((r) => r.exchange)
-        : [];
-
-    const smtpValid = toBool(pick(row, 'SMTP Valid', 'is smtp valid'));
-    const checkedAt = pick(row, 'Checked At', 'checked at');
+    const overall = mapResult(verdict);
 
     return {
         email,
         overall,
-        result: verdict === undefined ? 'unknown' : String(verdict),
+        safeToSend: overall === 'valid',
+        result: verdict,
         deliverabilityScore: toNumber(pick(row, 'Deliverability Score', 'score')),
-        syntax: { passed: toBool(pick(row, 'Syntax Valid', 'is syntax valid')) ?? isValidSyntax(email) },
-        mx: { passed: toBool(pick(row, 'MX Valid', 'is mx valid')), domain, records },
-        smtp: { passed: smtpValid, rejected: smtpValid === false },
-        flags: {
-            dnsValid: toBool(pick(row, 'DNS Valid', 'is dns valid')),
-            disposable,
-            roleBased,
-            catchAll,
-        },
+        syntaxValid: toBool(pick(row, 'Syntax Valid')) ?? isValidSyntax(email),
+        dnsValid: toBool(pick(row, 'DNS Valid')),
+        mxValid: toBool(pick(row, 'MX Valid')),
+        smtpValid: toBool(pick(row, 'SMTP Valid')),
+        catchAll: verdictKey === 'catchall',
+        roleName: roleName ? String(roleName) : null,
+        disposableProvider: disposableProvider ? String(disposableProvider) : null,
         validationMode: 'full',
-        raw: row,
-        checkedAt: checkedAt ? String(checkedAt) : new Date().toISOString(),
+        checkedAt: String(pick(row, 'Checked At') ?? new Date().toISOString()),
     };
 }
 
@@ -155,18 +139,21 @@ function rowToActorResult(row) {
 // these results are never charged for.
 function toSyntaxOnlyResult(email) {
     const passes = isValidSyntax(email);
-    const domain = email.includes('@') ? email.split('@').pop().toLowerCase() : '';
     return {
         email,
         overall: passes ? 'unknown' : 'invalid',
+        safeToSend: false,
         result: passes ? 'unknown' : 'invalid',
         deliverabilityScore: null,
-        syntax: { passed: passes },
-        mx: { passed: null, domain, records: [] },
-        smtp: { passed: null, rejected: null },
-        flags: { dnsValid: null, disposable: null, roleBased: null, catchAll: null },
+        syntaxValid: passes,
+        dnsValid: null,
+        mxValid: null,
+        smtpValid: null,
+        catchAll: null,
+        roleName: null,
+        disposableProvider: null,
         validationMode: 'syntax-only',
-        warning: 'Syntax check only — no DNS, MX or SMTP verification was performed, and this result was not charged for.',
+        warning: 'Syntax check only \u2014 no DNS, MX or SMTP verification was performed, and this result was not charged for.',
         checkedAt: new Date().toISOString(),
     };
 }
@@ -174,16 +161,19 @@ function toSyntaxOnlyResult(email) {
 // Build a record for an address the service could not answer for. Same field
 // shape as every other record so the dataset schema accepts it.
 function toErrorResult(email, message, validationMode) {
-    const domain = email.includes('@') ? email.split('@').pop().toLowerCase() : '';
     return {
         email,
         overall: 'error',
+        safeToSend: false,
         result: 'unknown',
         deliverabilityScore: null,
-        syntax: { passed: isValidSyntax(email) },
-        mx: { passed: null, domain, records: [] },
-        smtp: { passed: null, rejected: null },
-        flags: { dnsValid: null, disposable: null, roleBased: null, catchAll: null },
+        syntaxValid: isValidSyntax(email),
+        dnsValid: null,
+        mxValid: null,
+        smtpValid: null,
+        catchAll: null,
+        roleName: null,
+        disposableProvider: null,
         validationMode,
         error: message,
         warning: 'This address could not be verified and was not charged for.',
