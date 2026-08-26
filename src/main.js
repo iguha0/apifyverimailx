@@ -14,9 +14,18 @@ const VERIMAILX_BASE = 'https://api.verimailx.com';
 const BULK_ENDPOINT = `${VERIMAILX_BASE}/bulk-validate`;
 const BULK_MAX = 1000;
 
+// Pay-per-event charge fired once per address that reaches a real verdict.
+const CHARGE_EVENT = 'email-verified';
+
+// Cap on how much of a remote list file we will read (10 MB).
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
 // RFC-5322-ish email syntax check. Mirrors the regex used in test.js so the
 // local "syntax-only" path agrees with the unit tests.
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+
+// Looser variant used to pull addresses out of arbitrary CSV/TXT content.
+const EMAIL_SCAN_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}/g;
 
 function isValidSyntax(email) {
     return typeof email === 'string' && EMAIL_REGEX.test(email.trim());
@@ -63,7 +72,8 @@ function toActorResult(item) {
 }
 
 // Build a syntax-only result for an email when no API key is configured.
-// MX / SMTP / flags are null because those checks were not performed.
+// MX / SMTP / flags are null because those checks were not performed, and
+// these results are never charged for.
 function toSyntaxOnlyResult(email) {
     const passes = isValidSyntax(email);
     const domain = email.includes('@') ? email.split('@').pop().toLowerCase() : '';
@@ -77,6 +87,7 @@ function toSyntaxOnlyResult(email) {
         smtp: { passed: null, rejected: null },
         flags: { dnsValid: null, disposable: null, roleBased: null },
         validationMode: 'syntax-only',
+        warning: 'Syntax check only — no DNS, MX or SMTP verification was performed, and this result was not charged for.',
         checkedAt: new Date().toISOString(),
     };
 }
@@ -113,16 +124,96 @@ function chunk(array, size) {
     return chunks;
 }
 
+// Pull every address out of a plain-text or CSV body. Works with one address
+// per line, comma-separated values, and CSVs with arbitrary extra columns.
+function extractEmails(text) {
+    return text.match(EMAIL_SCAN_REGEX) ?? [];
+}
+
+// Download a remote .csv / .txt list and return the addresses it contains.
+async function readEmailsFromUrl(url) {
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+        throw new Error(`Could not download the email list from ${url} — server returned ${response.status} ${response.statusText}.`);
+    }
+
+    const declaredLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_FILE_BYTES) {
+        throw new Error(`The file at ${url} is ${Math.round(declaredLength / 1024 / 1024)} MB. The limit is ${MAX_FILE_BYTES / 1024 / 1024} MB — split it into smaller files.`);
+    }
+
+    const text = await response.text();
+    if (text.length > MAX_FILE_BYTES) {
+        throw new Error(`The file at ${url} exceeds the ${MAX_FILE_BYTES / 1024 / 1024} MB limit — split it into smaller files.`);
+    }
+
+    return extractEmails(text);
+}
+
+// Read addresses out of an existing Apify dataset, e.g. the output of a
+// scraper that ran earlier in the same workflow.
+async function readEmailsFromDataset(datasetId, field) {
+    const dataset = await Actor.openDataset(datasetId, { forceCloud: true });
+    const { items } = await dataset.getData();
+    const collected = [];
+
+    for (const item of items) {
+        if (field) {
+            const value = item?.[field];
+            if (typeof value === 'string') collected.push(...extractEmails(value));
+            continue;
+        }
+        // No field named: scan every string value on the record.
+        for (const value of Object.values(item ?? {})) {
+            if (typeof value === 'string') collected.push(...extractEmails(value));
+        }
+    }
+
+    return collected;
+}
+
+// Gather addresses from every input source the actor accepts.
+async function collectEmails(input) {
+    const collected = [];
+
+    if (typeof input?.email === 'string' && input.email.trim()) {
+        collected.push(input.email.trim());
+    }
+
+    if (Array.isArray(input?.emails)) {
+        collected.push(...input.emails.filter((e) => typeof e === 'string'));
+    }
+
+    if (typeof input?.emailFileUrl === 'string' && input.emailFileUrl.trim()) {
+        const fromFile = await readEmailsFromUrl(input.emailFileUrl.trim());
+        log.info(`Read ${fromFile.length} address(es) from ${input.emailFileUrl.trim()}`);
+        collected.push(...fromFile);
+    }
+
+    if (typeof input?.datasetId === 'string' && input.datasetId.trim()) {
+        const fromDataset = await readEmailsFromDataset(input.datasetId.trim(), input.datasetField?.trim());
+        log.info(`Read ${fromDataset.length} address(es) from dataset ${input.datasetId.trim()}`);
+        collected.push(...fromDataset);
+    }
+
+    return collected;
+}
+
 async function main() {
     await Actor.init();
 
-    // API key is optional. Without it we fall back to syntax-only validation
-    // so the actor still produces useful output (and passes Apify's QA test,
-    // which does not provide credentials).
+    // The Verimailx key is what makes real verification possible. Without it the
+    // actor still runs so it produces usable output (and so Apify's automated QA
+    // test passes without credentials), but it performs syntax checks only,
+    // says so on every record, and charges nothing.
     const apiKey = process.env[API_KEY_ENV];
     const hasApiKey = Boolean(apiKey);
     if (!hasApiKey) {
-        log.warning(`${API_KEY_ENV} is not set. Falling back to syntax-only validation. Configure the secret in the Apify console for full Verimailx checks.`);
+        log.warning('='.repeat(78));
+        log.warning(`${API_KEY_ENV} is not set, so full verification is unavailable.`);
+        log.warning('This run performs SYNTAX CHECKS ONLY — no DNS, MX or SMTP verification.');
+        log.warning('Nothing will be charged for these results.');
+        log.warning('='.repeat(78));
     }
 
     let input;
@@ -134,19 +225,28 @@ async function main() {
         return;
     }
 
-    const rawEmails = Array.isArray(input?.emails) ? input.emails : [];
+    let rawEmails;
+    try {
+        rawEmails = await collectEmails(input);
+    } catch (err) {
+        log.error(err.message);
+        await Actor.fail(err.message);
+        return;
+    }
+
     const emails = [...new Set(rawEmails
         .filter((e) => typeof e === 'string' && e.trim().length > 0)
         .map((e) => e.trim().toLowerCase()))];
     const dropped = rawEmails.length - emails.length;
 
     if (dropped > 0) {
-        log.warning(`Skipped ${dropped} non-string, empty, or duplicate input item(s).`);
+        log.warning(`Skipped ${dropped} empty or duplicate input item(s).`);
     }
 
     if (emails.length === 0) {
-        log.warning('No valid email strings provided in input. Exiting.');
-        await Actor.exit();
+        const message = 'No email addresses found. Provide them via "email", "emails", "emailFileUrl", or "datasetId".';
+        log.error(message);
+        await Actor.fail(message);
         return;
     }
 
@@ -156,16 +256,17 @@ async function main() {
 
     let successCount = 0;
     let errorCount = 0;
+    let chargedCount = 0;
 
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
         const batch = batches[batchIndex];
 
-        // Syntax-only path: no API calls, push local validation for each email.
+        // Syntax-only path: no API calls, no charges.
         if (!hasApiKey) {
             for (const email of batch) {
                 const result = toSyntaxOnlyResult(email);
                 await Actor.pushData(result);
-                log.info(`${result.email} -> ${result.overall} (${validationMode})`);
+                log.info(`${result.email} -> ${result.overall} (${validationMode}, not charged)`);
                 successCount += 1;
             }
             continue;
@@ -183,6 +284,17 @@ async function main() {
             for (const item of results) {
                 const result = toActorResult(item);
                 await Actor.pushData(result);
+
+                // Charge only for addresses that reached a real verdict. This is
+                // what bills the "Email Verified" pay-per-event price — without
+                // it the actor delivers verification for free.
+                try {
+                    await Actor.charge({ eventName: CHARGE_EVENT, count: 1 });
+                    chargedCount += 1;
+                } catch (chargeError) {
+                    log.warning(`Could not charge for ${result.email}: ${chargeError?.message ?? chargeError}`);
+                }
+
                 log.info(`${result.email} -> ${result.overall} (verimailx:${result.result} score:${result.deliverabilityScore ?? '-'})`);
                 successCount += 1;
             }
@@ -191,6 +303,7 @@ async function main() {
                 log.info(`Batch ${batchIndex + 1} done. Credits remaining: ${payload.credits_remaining}`);
             }
         } catch (error) {
+            // Failed batches are reported but never charged for.
             log.error(`Batch ${batchIndex + 1} failed: ${error?.message ?? error}`);
             for (const email of batch) {
                 await Actor.pushData({
@@ -207,7 +320,7 @@ async function main() {
         }
     }
 
-    log.info(`Done. success=${successCount} errors=${errorCount}`);
+    log.info(`Done. verified=${successCount} charged=${chargedCount} errors=${errorCount}`);
     await Actor.exit();
 }
 
