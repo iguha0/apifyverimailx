@@ -1,0 +1,14 @@
+# Installed inside the image by the Dockerfile — copying the local tree over it
+# both bloats the image and can overwrite production deps with dev ones.
+node_modules
+
+# Local run artifacts.
+storage
+apify_storage
+
+.git
+.gitignore
+
+# The MCP server is a separate Actor that happens to live in this folder for now.
+# Move it to its own repository; it must never be part of this Actor's build.
+_verimailx-mcp-actor

@@ -29,7 +29,7 @@ Every email you submit is checked across five dimensions:
 4. **SMTP handshake** — the receiving server confirms the address exists
 5. **Disposable / role-based / catch-all detection** — flags throwaway inboxes, role mailboxes (info@, admin@), and catch-all domains
 
-> **No API key?** If `APIFY-VERIMAILX-API-KEY` isn't configured, the Actor automatically falls back to **syntax-only validation** and reports `validationMode: "syntax-only"` in every output record. MX / SMTP / disposable / role-based fields are returned as `null` in that mode. Set the secret in the Apify console to unlock the full five-dimension check.
+> **Running without credentials.** If `APIFY-VERIMAILX-API-KEY` isn't configured, the Actor performs **syntax checks only**, marks every record with `validationMode: "syntax-only"` and a `warning` field, returns `null` for MX / SMTP / disposable / role-based, and **charges nothing**. You are never billed for a check that wasn't performed.
 
 Each address gets one of these verdicts:
 
@@ -42,22 +42,43 @@ Each address gets one of these verdicts:
 
 ---
 
-## Input
+## Input — four ways to hand over your list
 
-Pass a JSON array of email strings. Duplicates are de-duplicated automatically.
+Give the Actor addresses in whichever form you already have them. Sources can be combined; everything is merged and de-duplicated before verification.
+
+### A pasted list
 
 ```json
 {
-  "emails": [
-    "founder@stripe.com",
-    "[email protected]",
-    "[email protected]",
-    "[email protected]"
-  ]
+  "emails": ["founder@stripe.com", "sales@shopify.com", "info@example.com"]
 }
 ```
 
-That's it. No API key, no proxy config, no schema to learn. The Actor reads the Verimailx API key from its environment — set it once in the Apify console and forget about it.
+### A single address
+
+```json
+{ "email": "founder@stripe.com" }
+```
+
+### A CSV or TXT file
+
+Point the Actor at a public link — a Google Sheets CSV export, an S3 object, a Dropbox direct link. Every address in the file is picked up no matter which column it sits in, so you can upload your export untouched. Maximum 10 MB.
+
+```json
+{ "emailFileUrl": "https://example.com/leads-export.csv" }
+```
+
+### The output of another Actor
+
+Chain this straight onto a scraper without exporting anything in between.
+
+```json
+{ "datasetId": "aBcDeF123456", "datasetField": "email" }
+```
+
+Leave `datasetField` out and every text field on each record is scanned for addresses.
+
+No proxy config and no schema to learn. The Actor reads the Verimailx API key from its environment — set once in the Apify console.
 
 ---
 
@@ -132,7 +153,7 @@ One structured record per email, pushed to the run's default dataset. Export as 
 | Hunter | $1.00 |
 | Snovio | $0.50 |
 
-We are the cheapest verification Actor on the Apify marketplace, period.
+Competitor rates are list prices at the time of writing and change over time — check them before you switch.
 
 ---
 
@@ -140,8 +161,8 @@ We are the cheapest verification Actor on the Apify marketplace, period.
 
 ### Option 1 — Apify Console (no code)
 
-1. Open the [Email Verifier Actor](https://console.apify.com) in your browser.
-2. Paste your list of emails into the input field.
+1. Open the [Actor](https://apify.com/cold_email_master/email-verifier-validator) in your browser.
+2. Paste your list, or drop in a link to your CSV.
 3. Click **Start**.
 4. Wait for the run to finish (typically 5–30 seconds per 1,000 emails).
 5. Download the results as CSV or JSON from the **Output** tab.
@@ -150,12 +171,12 @@ We are the cheapest verification Actor on the Apify marketplace, period.
 
 ```bash
 curl -X POST \
-  "https://api.apify.com/v2/acts/<your-username>~email-verifier/run-sync?token=<your-token>" \
+  "https://api.apify.com/v2/acts/cold_email_master~email-verifier-validator/run-sync-get-dataset-items?token=<your-token>" \
   -H "Content-Type: application/json" \
-  -d '{"emails":["[email protected]","[email protected]"]}'
+  -d '{"emails":["founder@stripe.com","sales@shopify.com"]}'
 ```
 
-You'll get the full result back in one HTTP response.
+You'll get the verified records back in one HTTP response.
 
 ### Option 3 — Apify API client (Node.js)
 
@@ -164,8 +185,8 @@ import { ApifyClient } from 'apify-client';
 
 const client = new ApifyClient({ token: '<your-token>' });
 
-const run = await client.actor('<your-username>/email-verifier').call({
-  emails: ['[email protected]', '[email protected]', '[email protected]']
+const run = await client.actor('cold_email_master/email-verifier-validator').call({
+  emailFileUrl: 'https://example.com/leads-export.csv'
 });
 
 const { items } = await client.dataset(run.defaultDatasetId).listItems();
@@ -202,6 +223,15 @@ A: Yes. Any email that fails to validate (due to network errors, upstream API is
 **Q: Does the Actor support IPv6 / IDN domains?**
 A: Yes — Verimailx handles both. Submit `[email protected]` or `[email protected]` and they'll be processed normally.
 
+**Q: How do I verify a CSV of emails?**
+A: Upload the CSV somewhere with a public link — a Google Sheets CSV export or an S3 object both work — and pass that link as `emailFileUrl`. Every address in the file is picked up regardless of which column holds it, so there's no need to reshape your export first. Files up to 10 MB.
+
+**Q: Does this Actor send any email?**
+A: No. Verification stops at the SMTP handshake, which asks the receiving server whether the mailbox exists without ever delivering a message. Nobody on your list is contacted.
+
+**Q: Can I run it on the output of a scraper?**
+A: Yes — pass the scraper run's `datasetId` and the Actor reads the addresses straight out of it, no export step in between.
+
 ---
 
 ## Support
@@ -213,6 +243,12 @@ A: Yes — Verimailx handles both. Submit `[email protected]` or `[email protect
 ---
 
 ## Changelog
+
+### 0.0.6 — Input flexibility and honest billing
+- Added three new ways to supply addresses: a single `email`, a link to a CSV or TXT file (`emailFileUrl`), and an existing Apify dataset (`datasetId` / `datasetField`). Sources can be combined and are de-duplicated together.
+- The Actor now charges the **Email Verified** event for each address that reaches a real verdict. Previously the event was defined but never fired, so full verifications were delivered without being billed.
+- Syntax-only runs (no API key configured) and failed batches are explicitly **not charged**, and syntax-only records carry a `warning` field saying which checks were skipped.
+- Empty input now fails with a message naming the four accepted input fields instead of exiting quietly.
 
 ### 0.0.5 — Apify QA hardening
 - Added `default` and `prefill` to the input schema so the Apify Store automated test always has a valid email to validate.
