@@ -1,7 +1,7 @@
 {
     "actorSpecification": 1,
     "title": "Email Verifier dataset",
-    "description": "One item per validated email. Mirrors the Verimailx /bulk-validate response, reshaped for the actor's three-state overall verdict. In syntax-only mode (no API key), mx/smtp/flags fields are null because those checks were not performed.",
+    "description": "One item per address verified. Flat by design so the Output table reads at a glance: safeToSend answers the question, overall groups it, and the individual checks sit alongside.",
     "fields": {
         "type": "object",
         "required": [
@@ -9,9 +9,6 @@
             "overall",
             "result",
             "validationMode",
-            "syntax",
-            "mx",
-            "smtp",
             "checkedAt"
         ],
         "properties": {
@@ -21,8 +18,8 @@
             },
             "overall": {
                 "type": "string",
-                "title": "Overall",
-                "description": "Actor verdict: valid | invalid | risky | unknown | error",
+                "title": "Verdict",
+                "description": "valid = safe to send; invalid = will bounce; risky = catch-all, disposable or role mailbox; unknown = no determination; error = could not be checked",
                 "enum": [
                     "valid",
                     "invalid",
@@ -31,10 +28,15 @@
                     "error"
                 ]
             },
+            "safeToSend": {
+                "type": "boolean",
+                "title": "Safe to send",
+                "description": "True only for a confirmed deliverable mailbox. Filter on this to get a clean sending list."
+            },
             "result": {
                 "type": "string",
-                "title": "Verimailx",
-                "description": "Raw Verimailx verdict, passed through unchanged (valid, invalid, catch_all, unknown, ...)"
+                "title": "Raw result",
+                "description": "The verification service's own verdict, passed through unchanged (valid, invalid, catch_all, disposable, role, unknown)"
             },
             "deliverabilityScore": {
                 "type": [
@@ -42,136 +44,79 @@
                     "null"
                 ],
                 "title": "Score",
-                "description": "Verimailx deliverability score (0-100), or null if unavailable"
+                "description": "0-100"
+            },
+            "syntaxValid": {
+                "type": [
+                    "boolean",
+                    "null"
+                ],
+                "title": "Syntax"
+            },
+            "dnsValid": {
+                "type": [
+                    "boolean",
+                    "null"
+                ],
+                "title": "DNS"
+            },
+            "mxValid": {
+                "type": [
+                    "boolean",
+                    "null"
+                ],
+                "title": "MX"
+            },
+            "smtpValid": {
+                "type": [
+                    "boolean",
+                    "null"
+                ],
+                "title": "SMTP"
+            },
+            "catchAll": {
+                "type": [
+                    "boolean",
+                    "null"
+                ],
+                "title": "Catch-all",
+                "description": "The domain accepts mail for any address, so this mailbox cannot be confirmed"
+            },
+            "roleName": {
+                "type": [
+                    "string",
+                    "null"
+                ],
+                "title": "Role",
+                "description": "The role this address serves (support, info, admin), or null"
+            },
+            "disposableProvider": {
+                "type": [
+                    "string",
+                    "null"
+                ],
+                "title": "Disposable provider",
+                "description": "The throwaway-mail provider behind this address, or null"
             },
             "validationMode": {
                 "type": "string",
                 "title": "Mode",
-                "description": "Validation depth: 'full' = Verimailx API call made, 'syntax-only' = local RFC syntax check only (no API key configured)",
                 "enum": [
                     "full",
                     "syntax-only"
                 ]
             },
-            "syntax": {
-                "type": "object",
-                "title": "Syntax",
-                "properties": {
-                    "passed": {
-                        "type": "boolean",
-                        "title": "Passed"
-                    }
-                }
-            },
-            "mx": {
-                "type": "object",
-                "title": "MX",
-                "properties": {
-                    "passed": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "Passed"
-                    },
-                    "domain": {
-                        "type": "string",
-                        "title": "Domain"
-                    },
-                    "records": {
-                        "type": "array",
-                        "title": "MX records",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "exchange": {
-                                    "type": [
-                                        "string",
-                                        "null"
-                                    ],
-                                    "title": "Exchange"
-                                },
-                                "priority": {
-                                    "type": [
-                                        "integer",
-                                        "null"
-                                    ],
-                                    "title": "Priority"
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "smtp": {
-                "type": "object",
-                "title": "SMTP",
-                "properties": {
-                    "passed": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "Passed"
-                    },
-                    "rejected": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "Rejected"
-                    }
-                }
-            },
-            "flags": {
-                "type": "object",
-                "title": "Flags",
-                "properties": {
-                    "dnsValid": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "DNS valid"
-                    },
-                    "disposable": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "Disposable"
-                    },
-                    "roleBased": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "Role-based"
-                    },
-                    "catchAll": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ],
-                        "title": "Catch-all"
-                    }
-                }
-            },
-            "error": {
-                "type": [
-                    "string",
-                    "null"
-                ],
-                "title": "Error"
-            },
             "checkedAt": {
                 "type": "string",
                 "title": "Checked at"
             },
-            "raw": {
-                "type": "object",
-                "title": "Raw row",
-                "description": "The results-file row exactly as returned, so no column is lost if it is named unexpectedly."
+            "error": {
+                "type": "string",
+                "title": "Error"
+            },
+            "warning": {
+                "type": "string",
+                "title": "Warning"
             }
         }
     },
@@ -182,14 +127,16 @@
                 "fields": [
                     "email",
                     "overall",
-                    "result",
+                    "safeToSend",
                     "deliverabilityScore",
-                    "validationMode",
-                    "syntax.passed",
-                    "mx.passed",
-                    "smtp.passed",
-                    "flags.disposable",
-                    "flags.roleBased",
+                    "result",
+                    "catchAll",
+                    "roleName",
+                    "disposableProvider",
+                    "syntaxValid",
+                    "dnsValid",
+                    "mxValid",
+                    "smtpValid",
                     "checkedAt"
                 ]
             },
@@ -202,39 +149,83 @@
                     },
                     {
                         "field": "overall",
-                        "label": "Overall"
+                        "label": "Verdict"
                     },
                     {
-                        "field": "result",
-                        "label": "Verimailx"
+                        "field": "safeToSend",
+                        "label": "Safe to send"
                     },
                     {
                         "field": "deliverabilityScore",
                         "label": "Score"
                     },
                     {
-                        "field": "validationMode",
-                        "label": "Mode"
+                        "field": "result",
+                        "label": "Raw result"
                     },
                     {
-                        "field": "syntax.passed",
-                        "label": "Syntax"
+                        "field": "catchAll",
+                        "label": "Catch-all"
                     },
                     {
-                        "field": "mx.passed",
-                        "label": "MX"
+                        "field": "roleName",
+                        "label": "Role"
                     },
                     {
-                        "field": "smtp.passed",
-                        "label": "SMTP"
-                    },
-                    {
-                        "field": "flags.disposable",
+                        "field": "disposableProvider",
                         "label": "Disposable"
                     },
                     {
-                        "field": "flags.roleBased",
-                        "label": "Role-based"
+                        "field": "syntaxValid",
+                        "label": "Syntax"
+                    },
+                    {
+                        "field": "dnsValid",
+                        "label": "DNS"
+                    },
+                    {
+                        "field": "mxValid",
+                        "label": "MX"
+                    },
+                    {
+                        "field": "smtpValid",
+                        "label": "SMTP"
+                    },
+                    {
+                        "field": "checkedAt",
+                        "label": "Checked at"
+                    }
+                ]
+            }
+        },
+        "sendable": {
+            "title": "Safe to send",
+            "transformation": {
+                "fields": [
+                    "email",
+                    "deliverabilityScore",
+                    "result",
+                    "checkedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "columns": [
+                    {
+                        "field": "email",
+                        "label": "Email"
+                    },
+                    {
+                        "field": "deliverabilityScore",
+                        "label": "Score"
+                    },
+                    {
+                        "field": "result",
+                        "label": "Raw result"
+                    },
+                    {
+                        "field": "checkedAt",
+                        "label": "Checked at"
                     }
                 ]
             }
