@@ -12,7 +12,7 @@ Powered by [Verimailx](https://api.verimailx.com) and wrapped as a plug-and-play
 |---|---|
 | 🎯 **Accuracy** | 99.9% across valid, invalid, and catch-all detection |
 | 💸 **Price** | $0.30 / 1,000 validations — cheapest on Apify |
-| ⚡ **Throughput** | About 5 seconds per address — roughly 12 per minute, batched and retried automatically |
+| ⚡ **Throughput** | Asynchronous jobs — submit the whole list at once, no size ceiling |
 | 🧹 **Clean output** | One structured record per email, ready to export as CSV or JSON |
 | 🔌 **Zero infra** | No SMTP, no DNS, no proxy rotation — the Actor handles it all |
 | 🔁 **Catch-all aware** | Correctly identifies catch-all domains so you don't bounce on the legitimate ones |
@@ -104,7 +104,8 @@ One structured record per email, pushed to the run's default dataset. Export as 
   "flags": {
     "dnsValid":   true,
     "disposable": false,
-    "roleBased":  false
+    "roleBased":  false,
+    "catchAll":   false
   },
   "checkedAt": "2026-08-09T10:14:22.418Z"
 }
@@ -116,7 +117,7 @@ One structured record per email, pushed to the run's default dataset. Export as 
 |---|---|---|
 | `email` | string | The address you submitted |
 | `overall` | string | `valid` / `invalid` / `risky` / `unknown` / `error` |
-| `result` | string | Raw Verimailx verdict: `valid` / `invalid` / `risky` / `unknown` |
+| `result` | string | Raw Verimailx verdict, passed through unchanged (`valid`, `invalid`, `catch_all`, `unknown`, …) |
 | `deliverabilityScore` | number | 0–100 confidence score from Verimailx (null in syntax-only mode) |
 | `validationMode` | string | `full` when Verimailx was called, `syntax-only` when only local RFC checks ran |
 | `syntax.passed` | bool | RFC-compliant structure |
@@ -126,6 +127,8 @@ One structured record per email, pushed to the run's default dataset. Export as 
 | `flags.disposable` | bool / null | Throwaway / temp-mail provider |
 | `flags.roleBased` | bool / null | Generic role (info@, support@, admin@) |
 | `flags.dnsValid` | bool / null | Domain resolves in DNS |
+| `flags.catchAll` | bool / null | Domain accepts mail for any address |
+| `raw` | object | The results-file row exactly as returned, so no column is lost |
 | `checkedAt` | string | ISO 8601 timestamp |
 
 ---
@@ -141,7 +144,7 @@ One structured record per email, pushed to the run's default dataset. Export as 
 | 10,000 emails | $3.00 |
 | 100,000 emails | $30.00 |
 
-> The Actor's compute time on Apify is free for batches under ~10 minutes. You pay only for the validation itself. Apify's platform fee (20%) is included in the per-email rate.
+> You pay per address verified. Apify's platform fee (20%) is included in the per-email rate, and a job that fails on the verification side is refunded automatically.
 
 ### How the price compares
 
@@ -161,17 +164,17 @@ Competitor rates are list prices at the time of writing and change over time —
 
 ### Option 1 — Apify Console (no code)
 
-1. Open the [Actor](https://apify.com/cold_email_master/email-verifier-validator) in your browser.
+1. Open the [Actor](https://apify.com/cold_email_master/bulk-email-verifier-validator) in your browser.
 2. Paste your list, or drop in a link to your CSV.
 3. Click **Start**.
-4. Wait for the run to finish — about five seconds per address (see [How long a run takes](#how-long-a-run-takes)).
+4. Wait for the run to finish — the log shows live progress (see [How long a run takes](#how-long-a-run-takes)).
 5. Download the results as CSV or JSON from the **Output** tab.
 
 ### Option 2 — Apify API (sync run, single HTTP call)
 
 ```bash
 curl -X POST \
-  "https://api.apify.com/v2/acts/cold_email_master~email-verifier-validator/run-sync-get-dataset-items?token=<your-token>" \
+  "https://api.apify.com/v2/acts/cold_email_master~bulk-email-verifier-validator/run-sync-get-dataset-items?token=<your-token>" \
   -H "Content-Type: application/json" \
   -d '{"emails":["founder@stripe.com","sales@shopify.com"]}'
 ```
@@ -185,7 +188,7 @@ import { ApifyClient } from 'apify-client';
 
 const client = new ApifyClient({ token: '<your-token>' });
 
-const run = await client.actor('cold_email_master/email-verifier-validator').call({
+const run = await client.actor('cold_email_master/bulk-email-verifier-validator').call({
   emailFileUrl: 'https://example.com/leads-export.csv'
 });
 
@@ -197,19 +200,18 @@ console.log(items);
 
 ## How long a run takes
 
-An SMTP handshake takes roughly **five seconds per address**, so plan for about **12 addresses a minute**:
+Verification is **asynchronous**. The Actor submits your whole list as one job, the verification service works through it server-side, and the Actor polls until it finishes — nothing holds a connection open, so there is no request-size ceiling and no batching to think about.
 
-| List size | Rough run time |
-|---|---|
-| 50 | 4 minutes |
-| 500 | 40 minutes |
-| 5,000 | 7 hours |
+Throughput depends on the list: addresses at fast, well-known providers resolve quickly, while slow or dead domains have to time out. Watch the progress line in the log:
 
-**Set the run timeout to match.** Apify's default is 300 seconds, which is only enough for about 60 addresses. For anything larger, raise the timeout in the run options before starting — a run that hits its timeout is cut off mid-list.
+```
+INFO Job 8f1c…c92 accepted: 5000 address(es), 5000 credit(s) reserved, 20000 remaining.
+INFO Verifying… 34% (1700/5000)
+```
 
-Addresses are sent upstream in small batches (20 by default) because the verification service drops any single request that takes longer than 150 seconds. A batch that times out anyway is automatically split in half and retried. Batches run one after another, which keeps credit consumption predictable.
+**Set the run timeout to cover the job.** Apify's default is 300 seconds. The Actor waits for a job for up to six hours, but the run's own timeout is the real limit — raise it in the run options before starting a large list.
 
-For lists in the millions, contact us — there's a bulk path that doesn't go through the Actor.
+Credits are reserved when the job is submitted and **refunded automatically if the job fails**, so a failed job costs you nothing.
 
 ---
 
@@ -253,6 +255,14 @@ A: Yes — pass the scraper run's `datasetId` and the Actor reads the addresses 
 ---
 
 ## Changelog
+
+### 0.1.0 — Asynchronous verification
+- Rewritten for the async bulk API. The Actor now submits the entire list in one request, receives a `job_id`, polls for progress, and downloads the signed results file when the job completes. **All batching, splitting and retry logic is gone** — it existed only to dodge the old 150-second gateway timeout, which no longer applies.
+- Live progress is logged as the job runs.
+- Credits are reserved at submission and refunded by the service if a job fails.
+- `catch_all`, `disposable` and `role_based` now map to **risky**. An address behind a catch-all domain cannot be confirmed, and that is the distinction that decides whether it is safe to send to.
+- Each record now carries a `raw` field holding the results-file row exactly as returned, so no column is lost.
+- The `batchSize` input is removed; it no longer means anything.
 
 ### 0.0.7 — Batch sizing and error handling
 - Batches are now **20 addresses** by default, not 1,000. The verification service drops any single request idle for 150 seconds, and at ~5s per address a 1,000-address request could never complete — it returned `504 IDLE_TIMEOUT` every time. A `batchSize` input allows up to 40.
