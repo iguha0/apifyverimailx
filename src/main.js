@@ -13,13 +13,13 @@ const API_KEY_ENV = 'APIFY-VERIMAILX-API-KEY';
 const VERIMAILX_BASE = 'https://api.verimailx.com';
 const BULK_ENDPOINT = `${VERIMAILX_BASE}/bulk-validate`;
 
-// The upstream gateway drops a request that stays idle for 150 seconds, and an
-// SMTP handshake takes roughly five seconds per address, so a request carrying
-// more than about thirty addresses times out before it can answer. Batches are
-// therefore kept small and sent in sequence; a batch that still times out is
-// split in half and retried once.
-const BULK_MAX_DEFAULT = 20;
-const BULK_MAX_ALLOWED = 40;
+// The upstream gateway drops a request that stays idle for 150 seconds. Measured
+// against a mixed list, an address costs roughly seven seconds — more when the
+// domain is slow to answer or has to time out in DNS — so batches of 40 and even
+// 20 both exceeded the limit in testing. Ten keeps a batch near seventy seconds
+// with room to spare; a batch that still times out is split in half and retried.
+const BULK_MAX_DEFAULT = 10;
+const BULK_MAX_ALLOWED = 25;
 const REQUEST_TIMEOUT_MS = 140_000;
 
 // Pay-per-event charge fired once per address that reaches a real verdict.
@@ -322,9 +322,9 @@ async function main() {
     const batches = chunk(emails, batchSize);
     const edition = isFreeTier ? ', free edition, not charged' : '';
     log.info(`Verifying ${emails.length} email(s) in ${batches.length} batch(es) of up to ${batchSize} (${validationMode} mode${edition})...`);
-    if (hasApiKey && emails.length > 200) {
-        const minutes = Math.ceil((emails.length * 5) / 60);
-        log.info(`Verification runs about five seconds per address, so expect roughly ${minutes} minute(s). Make sure this run's timeout allows for that.`);
+    if (hasApiKey && emails.length > 30) {
+        const minutes = Math.ceil((emails.length * 7) / 60);
+        log.info(`Verification runs about seven seconds per address, so expect roughly ${minutes} minute(s). Make sure this run's timeout allows for that — Apify's 300-second default covers about 40 addresses.`);
     }
 
     let successCount = 0;
