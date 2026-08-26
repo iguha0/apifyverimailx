@@ -12,7 +12,7 @@ Powered by [Verimailx](https://api.verimailx.com) and wrapped as a plug-and-play
 |---|---|
 | 🎯 **Accuracy** | 99.9% across valid, invalid, and catch-all detection |
 | 💸 **Price** | $0.30 / 1,000 validations — cheapest on Apify |
-| ⚡ **Throughput** | Up to 1,000 emails per API call, processed in batches automatically |
+| ⚡ **Throughput** | About 5 seconds per address — roughly 12 per minute, batched and retried automatically |
 | 🧹 **Clean output** | One structured record per email, ready to export as CSV or JSON |
 | 🔌 **Zero infra** | No SMTP, no DNS, no proxy rotation — the Actor handles it all |
 | 🔁 **Catch-all aware** | Correctly identifies catch-all domains so you don't bounce on the legitimate ones |
@@ -164,7 +164,7 @@ Competitor rates are list prices at the time of writing and change over time —
 1. Open the [Actor](https://apify.com/cold_email_master/email-verifier-validator) in your browser.
 2. Paste your list, or drop in a link to your CSV.
 3. Click **Start**.
-4. Wait for the run to finish (typically 5–30 seconds per 1,000 emails).
+4. Wait for the run to finish — about five seconds per address (see [How long a run takes](#how-long-a-run-takes)).
 5. Download the results as CSV or JSON from the **Output** tab.
 
 ### Option 2 — Apify API (sync run, single HTTP call)
@@ -195,11 +195,21 @@ console.log(items);
 
 ---
 
-## Limits & fairness
+## How long a run takes
 
-- **Hard cap per call:** 1,000 emails per batch. Submit more and the Actor will split them automatically and process them sequentially.
-- **Sequential processing:** Batches run one after another. This is intentional — it keeps credit consumption predictable and avoids bursting the upstream API.
-- **No persistent rate limits** — but if you need to verify 1M+ addresses, contact us for a bulk discount.
+An SMTP handshake takes roughly **five seconds per address**, so plan for about **12 addresses a minute**:
+
+| List size | Rough run time |
+|---|---|
+| 50 | 4 minutes |
+| 500 | 40 minutes |
+| 5,000 | 7 hours |
+
+**Set the run timeout to match.** Apify's default is 300 seconds, which is only enough for about 60 addresses. For anything larger, raise the timeout in the run options before starting — a run that hits its timeout is cut off mid-list.
+
+Addresses are sent upstream in small batches (20 by default) because the verification service drops any single request that takes longer than 150 seconds. A batch that times out anyway is automatically split in half and retried. Batches run one after another, which keeps credit consumption predictable.
+
+For lists in the millions, contact us — there's a bulk path that doesn't go through the Actor.
 
 ---
 
@@ -243,6 +253,14 @@ A: Yes — pass the scraper run's `datasetId` and the Actor reads the addresses 
 ---
 
 ## Changelog
+
+### 0.0.7 — Batch sizing and error handling
+- Batches are now **20 addresses** by default, not 1,000. The verification service drops any single request idle for 150 seconds, and at ~5s per address a 1,000-address request could never complete — it returned `504 IDLE_TIMEOUT` every time. A `batchSize` input allows up to 40.
+- Requests carry a 140-second client-side timeout, and a batch that times out is **split in half and retried** instead of failing outright.
+- Error records now carry the same field shape as every other record. Previously they were rejected by the dataset schema, which threw mid-run and discarded every result gathered up to that point.
+- A run where nothing could be verified now **fails** instead of reporting success with an empty dataset.
+- Every dataset write is guarded, so one rejected record can no longer end the run.
+- README run-time expectations corrected: the old "5–30 seconds per 1,000 emails" claim was wrong by three orders of magnitude.
 
 ### 0.0.6 — Input flexibility and honest billing
 - Added three new ways to supply addresses: a single `email`, a link to a CSV or TXT file (`emailFileUrl`), and an existing Apify dataset (`datasetId` / `datasetField`). Sources can be combined and are de-duplicated together.
