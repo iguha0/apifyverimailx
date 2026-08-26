@@ -68,10 +68,19 @@ function mapResult(value) {
     return 'unknown';
 }
 
-// Read a value out of a CSV row under any of several plausible header names.
+// Header names are compared with case, spaces, underscores and punctuation
+// stripped, so "Deliverability Score", "deliverability_score" and
+// "DeliverabilityScore" all resolve to the same column. The live file uses
+// Title Case with spaces; earlier guesses assumed snake_case and silently
+// missed every column but Email and Result.
+const normaliseKey = (key) => String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+
 function pick(row, ...names) {
     for (const name of names) {
-        if (row[name] !== undefined && row[name] !== '') return row[name];
+        const wanted = normaliseKey(name);
+        for (const [key, value] of Object.entries(row)) {
+            if (normaliseKey(key) === wanted && value !== undefined && value !== '') return value;
+        }
     }
     return undefined;
 }
@@ -94,45 +103,50 @@ function toNumber(value) {
 // defensively — the whole row is also attached as `raw` so nothing is lost if a
 // column is named differently than expected.
 function rowToActorResult(row) {
-    const email = String(pick(row, 'email', 'Email', 'address', 'email_address') ?? '').trim().toLowerCase();
-    const verdict = pick(row, 'result', 'Result', 'status', 'verdict');
+    const email = String(pick(row, 'Email', 'email address', 'address') ?? '').trim().toLowerCase();
+    const verdict = pick(row, 'Result', 'status', 'verdict');
     const domain = email.includes('@') ? email.split('@').pop() : '';
 
-    const disposable = toBool(pick(row, 'is_disposable', 'disposable'));
-    const roleBased = toBool(pick(row, 'is_role_based', 'role_based', 'role'));
-    const catchAll = toBool(pick(row, 'is_catch_all', 'catch_all', 'catchall'));
+    const verdictKey = String(verdict ?? '').toLowerCase().replace(/[^a-z]/g, '');
+    const disposable = toBool(pick(row, 'Disposable Provider', 'is disposable'));
+    const roleBased = toBool(pick(row, 'Role Detected', 'is role based'));
 
-    // A catch-all flag counts as risky even when the verdict column doesn't say so.
+    // The results file carries no catch-all column even though the job summary
+    // counts catch_all separately, so it is read off the verdict instead.
+    const catchAllColumn = toBool(pick(row, 'Catch All', 'is catch all'));
+    const catchAll = catchAllColumn ?? (verdictKey === 'catchall' ? true : null);
+
+    // A flag counts as risky even when the verdict column doesn't say so.
     let overall = mapResult(verdict);
     if (overall === 'valid' && (catchAll === true || disposable === true || roleBased === true)) {
         overall = 'risky';
     }
 
-    const mxRaw = pick(row, 'mx_hosts', 'mx', 'mx_records');
+    const mxRaw = pick(row, 'MX Hosts', 'mx records', 'mx');
     const records = typeof mxRaw === 'string' && mxRaw.trim()
         ? mxRaw.split(/[;|,]/).map((h) => ({ exchange: h.trim(), priority: null })).filter((r) => r.exchange)
         : [];
+
+    const smtpValid = toBool(pick(row, 'SMTP Valid', 'is smtp valid'));
+    const checkedAt = pick(row, 'Checked At', 'checked at');
 
     return {
         email,
         overall,
         result: verdict === undefined ? 'unknown' : String(verdict),
-        deliverabilityScore: toNumber(pick(row, 'deliverability_score', 'score')),
-        syntax: { passed: toBool(pick(row, 'is_syntax_valid', 'syntax_valid')) ?? isValidSyntax(email) },
-        mx: { passed: toBool(pick(row, 'is_mx_valid', 'mx_valid')), domain, records },
-        smtp: {
-            passed: toBool(pick(row, 'is_smtp_valid', 'smtp_valid')),
-            rejected: toBool(pick(row, 'is_smtp_valid', 'smtp_valid')) === false,
-        },
+        deliverabilityScore: toNumber(pick(row, 'Deliverability Score', 'score')),
+        syntax: { passed: toBool(pick(row, 'Syntax Valid', 'is syntax valid')) ?? isValidSyntax(email) },
+        mx: { passed: toBool(pick(row, 'MX Valid', 'is mx valid')), domain, records },
+        smtp: { passed: smtpValid, rejected: smtpValid === false },
         flags: {
-            dnsValid: toBool(pick(row, 'is_dns_valid', 'dns_valid')),
+            dnsValid: toBool(pick(row, 'DNS Valid', 'is dns valid')),
             disposable,
             roleBased,
             catchAll,
         },
         validationMode: 'full',
         raw: row,
-        checkedAt: new Date().toISOString(),
+        checkedAt: checkedAt ? String(checkedAt) : new Date().toISOString(),
     };
 }
 
