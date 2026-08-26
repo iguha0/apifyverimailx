@@ -1,19 +1,50 @@
 {
-    "title": "Email Verifier Input",
-    "description": "Provide a list of email addresses to validate via the Verimailx /bulk-validate API. The API key is configured separately as the APIFY-VERIMAILX-API-KEY environment variable in the Apify console. If the API key is not set, the Actor falls back to local syntax-only validation so it can still produce a usable result.",
+    "title": "Bulk Email Verifier Input",
+    "description": "Give the Actor addresses in whichever form you already have them: a single address, a pasted list, a link to a CSV or TXT file, or the ID of an existing Apify dataset. You can combine sources — everything is merged and de-duplicated before verification.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "emails": {
-            "title": "Emails to verify",
+            "title": "Email addresses",
             "type": "array",
-            "description": "Array of email address strings. Duplicates are removed; batches larger than 1,000 are split into multiple API calls. If the Verimailx API key is not configured, the Actor falls back to local syntax-only validation.",
+            "description": "Paste or type the addresses to verify. Duplicates are removed automatically, and lists longer than 1,000 are split into batches for you.",
             "editor": "stringList",
-            "items": { "type": "string" },
-            "minItems": 1,
-            "default": [ "[email protected]" ],
-            "prefill": [ "[email protected]" ]
+            "items": {
+                "type": "string"
+            },
+            "prefill": [
+                "someone@example.com"
+            ]
+        },
+        "email": {
+            "title": "Single email address",
+            "type": "string",
+            "description": "Verify just one address. Handy for testing, or for calling the Actor once per record from an automation.",
+            "editor": "textfield",
+            "example": "someone@example.com"
+        },
+        "emailFileUrl": {
+            "title": "Link to a CSV or TXT file",
+            "type": "string",
+            "description": "A public link to a .csv or .txt file containing your list — a Google Sheets CSV export, an S3 object, a Dropbox direct link. Every address in the file is picked up regardless of which column it sits in, so you can upload your export untouched. Maximum 10 MB.",
+            "editor": "textfield",
+            "example": "https://example.com/my-list.csv"
+        },
+        "datasetId": {
+            "title": "Apify dataset ID",
+            "type": "string",
+            "description": "Verify the addresses inside a dataset produced by another Actor — chain this straight onto a scraper without exporting anything in between.",
+            "editor": "textfield",
+            "sectionCaption": "Verify the output of another Actor",
+            "sectionDescription": "Point this Actor at a dataset another run has already produced."
+        },
+        "datasetField": {
+            "title": "Field holding the address",
+            "type": "string",
+            "description": "Which field in each dataset record contains the email address, for example \"email\" or \"contactEmail\". Leave this empty and every text field on the record is scanned instead.",
+            "editor": "textfield",
+            "example": "email"
         }
     },
-    "required": [ "emails" ]
+    "required": []
 }

@@ -1,15 +1,18 @@
 {
     "actorSpecification": 1,
-    "name": "email-verifier",
-    "title": "Email Verifier",
-    "description": "Validates email addresses via the Verimailx /bulk-validate API (syntax, DNS/MX, SMTP, disposable, role-based).",
-    "version": "0.0.5",
+    "name": "email-verifier-validator",
+    "title": "Bulk Email Verifier & Validator | SMTP & Catch-All | $0.30/1k",
+    "description": "Bulk email verifier and validator that cleans email lists before outreach. Checks RFC syntax, DNS, MX records and SMTP handshake, with disposable, role-based and catch-all detection.",
+    "version": "0.0",
     "buildTag": "latest",
-    "meta": { "template": "empty" },
+    "meta": {
+        "template": "empty"
+    },
     "input": "./INPUT_SCHEMA.json",
     "dockerfile": "../Dockerfile",
     "readme": "../README.md",
     "output": "./output_schema.json",
-    "storages": { "dataset": "./dataset_schema.json" },
-    "environmentVariables": { "APIFY-VERIMAILX-API-KEY": "" }
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    }
 }
