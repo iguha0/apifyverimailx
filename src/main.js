@@ -12,7 +12,15 @@ const log = {
 const API_KEY_ENV = 'APIFY-VERIMAILX-API-KEY';
 const VERIMAILX_BASE = 'https://api.verimailx.com';
 const BULK_ENDPOINT = `${VERIMAILX_BASE}/bulk-validate`;
-const BULK_MAX = 1000;
+
+// The upstream gateway drops a request that stays idle for 150 seconds, and an
+// SMTP handshake takes roughly five seconds per address, so a request carrying
+// more than about thirty addresses times out before it can answer. Batches are
+// therefore kept small and sent in sequence; a batch that still times out is
+// split in half and retried once.
+const BULK_MAX_DEFAULT = 20;
+const BULK_MAX_ALLOWED = 40;
+const REQUEST_TIMEOUT_MS = 140_000;
 
 // Pay-per-event charge fired once per address that reaches a real verdict.
 const CHARGE_EVENT = 'email-verified';
@@ -98,20 +106,56 @@ function toSyntaxOnlyResult(email) {
     };
 }
 
+// Build a record for an address the upstream service could not answer for.
+// It carries the same field shape as every other record so the dataset schema
+// accepts it — an error row that the schema rejects takes the whole run down.
+function toErrorResult(email, message, validationMode) {
+    const domain = email.includes('@') ? email.split('@').pop().toLowerCase() : '';
+    return {
+        email,
+        overall: 'error',
+        result: 'unknown',
+        deliverabilityScore: null,
+        syntax: { passed: isValidSyntax(email) },
+        mx: { passed: null, domain, records: [] },
+        smtp: { passed: null, rejected: null },
+        flags: { dnsValid: null, disposable: null, roleBased: null },
+        validationMode,
+        error: message,
+        warning: 'This address could not be verified and was not charged for.',
+        checkedAt: new Date().toISOString(),
+    };
+}
+
 // POST { emails: [...] } to /bulk-validate and return the results array.
 async function callBulk(emails, apiKey) {
-    const response = await fetch(BULK_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'X-API-Key': apiKey,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ emails }),
-    });
+    let response;
+    try {
+        response = await fetch(BULK_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'X-API-Key': apiKey,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ emails }),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+    } catch (err) {
+        if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+            const timeoutError = new Error(`Verimailx did not answer within ${REQUEST_TIMEOUT_MS / 1000}s for a batch of ${emails.length}.`);
+            timeoutError.isTimeout = true;
+            throw timeoutError;
+        }
+        throw err;
+    }
 
     if (!response.ok) {
         const text = await response.text().catch(() => '');
-        throw new Error(`Verimailx API returned ${response.status}: ${text || response.statusText}`);
+        const error = new Error(`Verimailx API returned ${response.status}: ${text || response.statusText}`);
+        // The upstream gateway reports its own idle timeout as a 504; treat it
+        // the same as a client-side timeout so the batch gets split and retried.
+        error.isTimeout = response.status === 504 || text.includes('IDLE_TIMEOUT');
+        throw error;
     }
 
     const payload = await response.json();
@@ -269,41 +313,50 @@ async function main() {
         return;
     }
 
+    const requestedBatchSize = Number.parseInt(input?.batchSize ?? '', 10);
+    const batchSize = Number.isInteger(requestedBatchSize) && requestedBatchSize > 0
+        ? Math.min(requestedBatchSize, BULK_MAX_ALLOWED)
+        : BULK_MAX_DEFAULT;
+
     const validationMode = hasApiKey ? 'full' : 'syntax-only';
-    const batches = chunk(emails, BULK_MAX);
+    const batches = chunk(emails, batchSize);
     const edition = isFreeTier ? ', free edition, not charged' : '';
-    log.info(`Verifying ${emails.length} email(s) across ${batches.length} batch(es) of up to ${BULK_MAX} (${validationMode} mode${edition})...`);
+    log.info(`Verifying ${emails.length} email(s) in ${batches.length} batch(es) of up to ${batchSize} (${validationMode} mode${edition})...`);
+    if (hasApiKey && emails.length > 200) {
+        const minutes = Math.ceil((emails.length * 5) / 60);
+        log.info(`Verification runs about five seconds per address, so expect roughly ${minutes} minute(s). Make sure this run's timeout allows for that.`);
+    }
 
     let successCount = 0;
     let errorCount = 0;
     let chargedCount = 0;
 
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
-        const batch = batches[batchIndex];
-
-        // Syntax-only path: no API calls, no charges.
-        if (!hasApiKey) {
-            for (const email of batch) {
-                const result = toSyntaxOnlyResult(email);
-                await Actor.pushData(result);
-                log.info(`${result.email} -> ${result.overall} (${validationMode}, not charged)`);
-                successCount += 1;
-            }
-            continue;
+    // A record the dataset schema rejects would otherwise throw and kill the
+    // whole run, losing every result gathered so far.
+    const safePush = async (record) => {
+        try {
+            await Actor.pushData(record);
+            return true;
+        } catch (pushError) {
+            log.error(`Could not save the result for ${record.email}: ${pushError?.message ?? pushError}`);
+            return false;
         }
+    };
 
-        // Full path: call Verimailx /bulk-validate.
+    // Verify one batch, splitting it in half and retrying if the upstream
+    // service times out on a batch this size.
+    const verifyBatch = async (batch, label, canSplit) => {
         try {
             const payload = await callBulk(batch, apiKey);
             const results = payload.results;
 
             if (results.length !== batch.length) {
-                log.warning(`Batch ${batchIndex + 1}: Verimailx returned ${results.length} results for ${batch.length} emails.`);
+                log.warning(`${label}: Verimailx returned ${results.length} results for ${batch.length} emails.`);
             }
 
             for (const item of results) {
                 const result = toActorResult(item);
-                await Actor.pushData(result);
+                await safePush(result);
 
                 // Charge only for addresses that reached a real verdict. This is
                 // what bills the "Email Verified" pay-per-event price — without
@@ -323,27 +376,55 @@ async function main() {
             }
 
             if (typeof payload?.credits_remaining === 'number') {
-                log.info(`Batch ${batchIndex + 1} done. Credits remaining: ${payload.credits_remaining}`);
+                log.info(`${label} done. Credits remaining: ${payload.credits_remaining}`);
             }
+            return;
         } catch (error) {
-            // Failed batches are reported but never charged for.
-            log.error(`Batch ${batchIndex + 1} failed: ${error?.message ?? error}`);
-            for (const email of batch) {
-                await Actor.pushData({
-                    email,
-                    overall: 'error',
-                    result: 'unknown',
-                    deliverabilityScore: null,
-                    validationMode,
-                    error: error?.message ?? String(error),
-                    checkedAt: new Date().toISOString(),
-                });
+            if (error?.isTimeout && canSplit && batch.length > 1) {
+                const half = Math.ceil(batch.length / 2);
+                log.warning(`${label} timed out at ${batch.length} addresses. Splitting into two smaller batches and retrying.`);
+                await verifyBatch(batch.slice(0, half), `${label}a`, false);
+                await verifyBatch(batch.slice(half), `${label}b`, false);
+                return;
             }
-            errorCount += batch.length;
+
+            // Failed batches are reported but never charged for.
+            const message = error?.message ?? String(error);
+            log.error(`${label} failed: ${message}`);
+            for (const email of batch) {
+                await safePush(toErrorResult(email, message, validationMode));
+                errorCount += 1;
+            }
         }
+    };
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        const batch = batches[batchIndex];
+
+        // Syntax-only path: no API calls, no charges.
+        if (!hasApiKey) {
+            for (const email of batch) {
+                const result = toSyntaxOnlyResult(email);
+                await safePush(result);
+                log.info(`${result.email} -> ${result.overall} (${validationMode}, not charged)`);
+                successCount += 1;
+            }
+            continue;
+        }
+
+        await verifyBatch(batch, `Batch ${batchIndex + 1}/${batches.length}`, true);
     }
 
     log.info(`Done. verified=${successCount} charged=${chargedCount} errors=${errorCount}`);
+
+    // A run where nothing could be verified is a failure, whatever the exit
+    // path — reporting it as a success leaves the caller with an empty dataset
+    // and no reason to look at the log.
+    if (successCount === 0 && errorCount > 0) {
+        await Actor.fail(`No addresses could be verified — all ${errorCount} failed. See the log for the upstream error.`);
+        return;
+    }
+
     await Actor.exit();
 }
 
