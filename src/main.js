@@ -215,10 +215,18 @@ async function submitJob(emails, apiKey) {
     return payload;
 }
 
+// How many consecutive "job not found" responses to tolerate before giving up.
+// A couple are plausible while the job propagates; a steady stream means the
+// status endpoint cannot see the job at all, and waiting will not fix that.
+const MAX_NOT_FOUND = 5;
+
 // Poll until the job reaches a terminal state.
-async function pollJob(statusUrl, apiKey) {
+async function pollJob(statusUrl, apiKey, jobId) {
     const startedAt = Date.now();
     let lastPercent = -1;
+    let notFound = 0;
+
+    log.info(`Polling ${statusUrl} every ${POLL_INTERVAL_MS / 1000}s.`);
 
     for (;;) {
         if (Date.now() - startedAt > MAX_POLL_MS) {
@@ -233,13 +241,32 @@ async function pollJob(statusUrl, apiKey) {
                 headers: { 'X-API-Key': apiKey },
             }, POLL_TIMEOUT_MS, 'Verimailx status');
             const text = await response.text().catch(() => '');
+
+            if (response.status === 404) {
+                notFound += 1;
+                if (notFound >= MAX_NOT_FOUND) {
+                    throw new Error(
+                        `The status endpoint does not recognise job ${jobId}. `
+                        + `The submit returned it and the addresses were accepted, so the job is running — `
+                        + `but GET ${statusUrl} answers 404, so its results cannot be collected. `
+                        + `This is a fault in the verification service, not in this Actor. `
+                        + `Response: ${text.slice(0, 200)}`,
+                    );
+                }
+                log.warning(`Status check returned 404 (${notFound}/${MAX_NOT_FOUND}); the job may still be registering. Retrying in ${POLL_INTERVAL_MS / 1000}s.`);
+                continue;
+            }
+
             if (!response.ok) {
                 // A transient poll failure is not a job failure — keep waiting.
                 log.warning(`Status check returned ${response.status}; retrying in ${POLL_INTERVAL_MS / 1000}s.`);
                 continue;
             }
+
+            notFound = 0;
             payload = JSON.parse(text);
         } catch (err) {
+            if (err?.message?.includes('does not recognise job')) throw err;
             log.warning(`Status check failed (${err?.message ?? err}); retrying in ${POLL_INTERVAL_MS / 1000}s.`);
             continue;
         }
@@ -465,7 +492,11 @@ async function main() {
 
     let final;
     try {
-        final = await pollJob(job.status_url ?? `${BULK_ENDPOINT}?job_id=${encodeURIComponent(job.job_id)}`, apiKey);
+        final = await pollJob(
+            job.status_url ?? `${BULK_ENDPOINT}?job_id=${encodeURIComponent(job.job_id)}`,
+            apiKey,
+            job.job_id,
+        );
     } catch (err) {
         log.error(err.message);
         for (const email of emails) await safePush(toErrorResult(email, err.message, 'full'));
