@@ -7,7 +7,7 @@
         "emails": {
             "title": "Email addresses",
             "type": "array",
-            "description": "Paste or type the addresses to verify. Duplicates are removed automatically, and long lists are split into small batches and processed in sequence.",
+            "description": "Paste or type the addresses to verify. Duplicates are removed automatically. The whole list is submitted as one job and verified server-side.",
             "editor": "stringList",
             "items": {
                 "type": "string"
@@ -44,16 +44,6 @@
             "description": "Which field in each dataset record contains the email address, for example \"email\" or \"contactEmail\". Leave this empty and every text field on the record is scanned instead.",
             "editor": "textfield",
             "example": "email"
-        },
-        "batchSize": {
-            "title": "Addresses per request",
-            "type": "integer",
-            "description": "How many addresses to verify in a single upstream request. The default of 10 is tuned to finish comfortably inside the verification service's 150-second limit \u2014 measured against a mixed list, an address costs about seven seconds. A batch that times out anyway is split in half and retried automatically.",
-            "editor": "number",
-            "default": 10,
-            "minimum": 1,
-            "maximum": 25,
-            "sectionCaption": "Advanced"
         }
     },
     "required": []

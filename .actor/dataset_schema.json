@@ -147,6 +147,13 @@
                             "null"
                         ],
                         "title": "Role-based"
+                    },
+                    "catchAll": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "title": "Catch-all"
                     }
                 }
             },
@@ -160,6 +167,11 @@
             "checkedAt": {
                 "type": "string",
                 "title": "Checked at"
+            },
+            "raw": {
+                "type": "object",
+                "title": "Raw row",
+                "description": "The results-file row exactly as returned, so no column is lost if it is named unexpectedly."
             }
         }
     },
