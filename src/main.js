@@ -17,6 +17,12 @@ const BULK_MAX = 1000;
 // Pay-per-event charge fired once per address that reaches a real verdict.
 const CHARGE_EVENT = 'email-verified';
 
+// Set FREE_TIER_LIMIT on an Actor to run it as a free, capped edition: at most
+// this many addresses per run, and nothing is ever charged. Left unset, the
+// Actor runs unlimited and bills per verified address.
+const FREE_TIER_LIMIT = Number.parseInt(process.env.FREE_TIER_LIMIT ?? '', 10);
+const isFreeTier = Number.isInteger(FREE_TIER_LIMIT) && FREE_TIER_LIMIT > 0;
+
 // Cap on how much of a remote list file we will read (10 MB).
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -234,13 +240,26 @@ async function main() {
         return;
     }
 
-    const emails = [...new Set(rawEmails
+    const deduped = [...new Set(rawEmails
         .filter((e) => typeof e === 'string' && e.trim().length > 0)
         .map((e) => e.trim().toLowerCase()))];
-    const dropped = rawEmails.length - emails.length;
+    const dropped = rawEmails.length - deduped.length;
 
     if (dropped > 0) {
         log.warning(`Skipped ${dropped} empty or duplicate input item(s).`);
+    }
+
+    // Free edition: verify the first N addresses and say plainly how many were
+    // left out, rather than silently truncating the list.
+    let emails = deduped;
+    if (isFreeTier && deduped.length > FREE_TIER_LIMIT) {
+        emails = deduped.slice(0, FREE_TIER_LIMIT);
+        log.warning('='.repeat(78));
+        log.warning(`This free Actor verifies up to ${FREE_TIER_LIMIT} addresses per run.`);
+        log.warning(`You submitted ${deduped.length}, so ${deduped.length - FREE_TIER_LIMIT} were NOT checked.`);
+        log.warning('For unlimited runs at $0.30 per 1,000, use the full version:');
+        log.warning('https://apify.com/cold_email_master/bulk-email-verifier-validator');
+        log.warning('='.repeat(78));
     }
 
     if (emails.length === 0) {
@@ -252,7 +271,8 @@ async function main() {
 
     const validationMode = hasApiKey ? 'full' : 'syntax-only';
     const batches = chunk(emails, BULK_MAX);
-    log.info(`Verifying ${emails.length} email(s) across ${batches.length} batch(es) of up to ${BULK_MAX} (${validationMode} mode)...`);
+    const edition = isFreeTier ? ', free edition, not charged' : '';
+    log.info(`Verifying ${emails.length} email(s) across ${batches.length} batch(es) of up to ${BULK_MAX} (${validationMode} mode${edition})...`);
 
     let successCount = 0;
     let errorCount = 0;
@@ -287,12 +307,15 @@ async function main() {
 
                 // Charge only for addresses that reached a real verdict. This is
                 // what bills the "Email Verified" pay-per-event price — without
-                // it the actor delivers verification for free.
-                try {
-                    await Actor.charge({ eventName: CHARGE_EVENT, count: 1 });
-                    chargedCount += 1;
-                } catch (chargeError) {
-                    log.warning(`Could not charge for ${result.email}: ${chargeError?.message ?? chargeError}`);
+                // it the actor delivers verification for free. The free edition
+                // skips this entirely.
+                if (!isFreeTier) {
+                    try {
+                        await Actor.charge({ eventName: CHARGE_EVENT, count: 1 });
+                        chargedCount += 1;
+                    } catch (chargeError) {
+                        log.warning(`Could not charge for ${result.email}: ${chargeError?.message ?? chargeError}`);
+                    }
                 }
 
                 log.info(`${result.email} -> ${result.overall} (verimailx:${result.result} score:${result.deliverabilityScore ?? '-'})`);
