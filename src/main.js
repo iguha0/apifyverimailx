@@ -219,16 +219,23 @@ async function submitJob(emails, apiKey) {
     return payload;
 }
 
-// How many consecutive "job not found" responses to tolerate before giving up.
-// A couple are plausible while the job propagates; a steady stream means the
-// status endpoint cannot see the job at all, and waiting will not fix that.
-const MAX_NOT_FOUND = 5;
+// A 404 straight after submit is expected, not a failure: the service accepts a
+// job before it becomes queryable, and the larger the list the longer that takes.
+// Giving up after five polls meant abandoning a job roughly 35 seconds in, while
+// it was still registering — and the addresses had already been charged against
+// the caller's Verimailx credits, so the run failed AND cost them money. Two
+// different situations were being treated as one:
+//   - never seen yet  -> still registering. Wait, generously.
+//   - seen then gone  -> the job really has vanished. Fail fast.
+const NOT_FOUND_GRACE_MS = 5 * 60 * 1000;
+const MAX_NOT_FOUND_AFTER_SEEN = 5;
 
 // Poll until the job reaches a terminal state.
 async function pollJob(statusUrl, apiKey, jobId) {
     const startedAt = Date.now();
     let lastPercent = -1;
     let notFound = 0;
+    let everSeen = false;
 
     log.info(`Polling ${statusUrl} every ${POLL_INTERVAL_MS / 1000}s.`);
 
@@ -248,16 +255,26 @@ async function pollJob(statusUrl, apiKey, jobId) {
 
             if (response.status === 404) {
                 notFound += 1;
-                if (notFound >= MAX_NOT_FOUND) {
+                const waitedMs = Date.now() - startedAt;
+                const giveUp = everSeen
+                    ? notFound >= MAX_NOT_FOUND_AFTER_SEEN
+                    : waitedMs > NOT_FOUND_GRACE_MS;
+
+                if (giveUp) {
                     throw new Error(
-                        `The status endpoint does not recognise job ${jobId}. `
+                        `The status endpoint does not recognise job ${jobId} after `
+                        + `${Math.round(waitedMs / 1000)}s${everSeen ? ', having reported it earlier in this run' : ''}. `
                         + `The submit returned it and the addresses were accepted, so the job is running — `
                         + `but GET ${statusUrl} answers 404, so its results cannot be collected. `
                         + `This is a fault in the verification service, not in this Actor. `
                         + `Response: ${text.slice(0, 200)}`,
                     );
                 }
-                log.warning(`Status check returned 404 (${notFound}/${MAX_NOT_FOUND}); the job may still be registering. Retrying in ${POLL_INTERVAL_MS / 1000}s.`);
+
+                log.warning(everSeen
+                    ? `Job ${jobId} vanished from the status endpoint (${notFound}/${MAX_NOT_FOUND_AFTER_SEEN}); retrying in ${POLL_INTERVAL_MS / 1000}s.`
+                    : `Job ${jobId} is still registering ${Math.round(waitedMs / 1000)}s after submit `
+                      + `(waiting up to ${Math.round(NOT_FOUND_GRACE_MS / 60000)} min); retrying in ${POLL_INTERVAL_MS / 1000}s.`);
                 continue;
             }
 
@@ -268,6 +285,7 @@ async function pollJob(statusUrl, apiKey, jobId) {
             }
 
             notFound = 0;
+            everSeen = true;
             payload = JSON.parse(text);
         } catch (err) {
             if (err?.message?.includes('does not recognise job')) throw err;
