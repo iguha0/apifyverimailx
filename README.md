@@ -15,7 +15,7 @@ Powered by [Verimailx](https://api.verimailx.com) and wrapped as a plug-and-play
 | ⚡ **Throughput** | Asynchronous jobs — submit the whole list at once, no size ceiling |
 | 🧹 **Clean output** | One structured record per email, ready to export as CSV or JSON |
 | 🔌 **Zero infra** | No SMTP, no DNS, no proxy rotation — the Actor handles it all |
-| 🔁 **Catch-all verified** | Resolves individual mailboxes on catch-all domains instead of writing the whole domain off as risky |
+| 🔁 **B2B catch-all verified** | Resolves individual mailboxes on B2B catch-all domains instead of writing the whole domain off as risky |
 
 ---
 
@@ -27,7 +27,7 @@ Every email you submit is checked across five dimensions:
 2. **DNS validity** — the domain actually resolves
 3. **MX records** — the domain has mail servers configured to receive mail
 4. **SMTP handshake** — the receiving server confirms the address exists
-5. **Disposable / role-based detection, and catch-all resolution** — flags throwaway inboxes and role mailboxes (info@, admin@), and verifies individual mailboxes behind catch-all domains rather than discarding them
+5. **Disposable / role-based detection, and B2B catch-all resolution** — flags throwaway inboxes and role mailboxes (info@, admin@), and verifies individual mailboxes behind B2B catch-all domains rather than discarding them
 
 > **Running without credentials.** If `APIFY-VERIMAILX-API-KEY` isn't configured, the Actor performs **syntax checks only**, marks every record with `validationMode: "syntax-only"` and a `warning` field, returns `null` for MX / SMTP / disposable / role-based, and **charges nothing**. You are never billed for a check that wasn't performed.
 
@@ -37,7 +37,7 @@ Each address gets one of these verdicts:
 |---|---|
 | **`valid`** | Safe to send. Mailbox exists and accepts mail. |
 | **`invalid`** | Will bounce. Bad syntax, no MX, or SMTP explicitly rejected. |
-| **`risky`** | Disposable or role-based mailbox, or a catch-all address that could not be resolved. Treat with caution. |
+| **`risky`** | Disposable or role-based mailbox, or a catch-all address that could not be resolved (including consumer/B2C catch-alls, which are out of scope). Treat with caution. |
 | **`unknown`** | Server timeout or ambiguous response. Retry later. |
 
 ---
@@ -118,7 +118,7 @@ One structured record per email, pushed to the run's default dataset. Export as 
 | `dnsValid` | bool / null | Domain resolves in DNS |
 | `mxValid` | bool / null | Domain has usable MX records |
 | `smtpValid` | bool / null | Receiving server confirmed the address |
-| `catchAll` | bool | True only for a catch-all address that could not be resolved individually |
+| `catchAll` | bool | True only for a catch-all address that could not be resolved individually (B2C catch-alls included) |
 | `roleName` | string / null | The role detected, e.g. `support` — empty when not a role mailbox |
 | `disposableProvider` | string / null | The throwaway provider, e.g. `temporary-mail` — empty when not disposable |
 | `validationMode` | string | `full` when Verimailx was called |
@@ -214,7 +214,7 @@ Credits are reserved when the job is submitted and **refunded automatically if t
 A: We don't run our own SMTP infrastructure. Verimailx handles the SMTP handshakes at scale, and we pass their cost straight through with a thin margin.
 
 **Q: Do you actually verify addresses on catch-all domains?**
-A: Yes. A catch-all domain is configured to accept mail for any address, which is why most verifiers give up and label the whole domain risky — leaving you to guess on every address behind it. Verimailx resolves the individual mailbox, so a real address on a catch-all domain comes back `valid` and a fake one comes back `invalid`. On the rare address that still can't be resolved you get `risky` with `catchAll` set to true, so you always know which is which.
+A: Yes, for **B2B** catch-all domains. A catch-all domain accepts mail for any address, which is why most verifiers give up and label the whole domain risky — leaving you to guess on every address behind it. Verimailx resolves the individual mailbox on business domains, so a real address comes back `valid` and a fake one comes back `invalid`. Consumer (B2C) catch-alls are **not** in scope, and any address that can't be resolved comes back `risky` with `catchAll` set to true — so you always know which is which rather than being handed a false positive.
 
 **Q: Will this work for my cold outreach list?**
 A: Yes. Drop your CSV in, get back a clean list. Use `overall = valid` for safe sends and `risky` for manual review.
@@ -249,8 +249,8 @@ A: Yes — pass the scraper run's `datasetId` and the Actor reads the addresses 
 
 ## Changelog
 
-### 0.2.0 — Catch-all addresses are now verified
-- The verification service resolves individual mailboxes behind catch-all domains, so a real address on a catch-all domain now returns **`valid`** and a fake one returns **`invalid`**, instead of the whole domain being written off as `risky`. `catchAll` is now true only for the rare address that still could not be resolved.
+### 0.2.0 — B2B catch-all addresses are now verified
+- The verification service resolves individual mailboxes behind **B2B** catch-all domains, so a real address on one now returns **`valid`** and a fake one returns **`invalid`**, instead of the whole domain being written off as `risky`. Consumer (B2C) catch-alls remain out of scope and still return `risky`; `catchAll` is true for anything that could not be resolved.
 - Output field documentation corrected: the records have been flat since 0.1.x, but this README still described the old nested `mx.*`, `smtp.*` and `flags.*` shape and a `raw` column that no longer exists.
 - Large jobs are no longer abandoned ~35 seconds after submission while the service is still registering them. A job that has never been seen now gets a five-minute grace window; one that disappears after being reported still fails fast.
 
