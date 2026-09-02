@@ -80,7 +80,7 @@
                     "null"
                 ],
                 "title": "Catch-all",
-                "description": "True only when the address sits behind a catch-all domain AND could not be resolved individually. Catch-all mailboxes are now verified directly, so most come back as a plain valid or invalid with this false."
+                "description": "True only when the address sits behind a catch-all domain AND could not be resolved individually. B2B catch-all mailboxes are verified directly, so most come back as a plain valid or invalid with this false. Consumer (B2C) catch-alls are out of scope and stay flagged here."
             },
             "roleName": {
                 "type": [
