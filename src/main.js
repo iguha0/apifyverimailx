@@ -59,10 +59,12 @@ function mapResult(value) {
     const v = String(value ?? '').toLowerCase();
     if (v === 'valid') return 'valid';
     if (v === 'invalid') return 'invalid';
-    // A catch-all domain accepts mail for any address, so a mailbox behind one
-    // cannot be confirmed — that is 'risky', not 'unknown', and it is the
-    // distinction that decides whether an address is safe to send to.
-    // Disposable and role-based mailboxes are risky for the same reason.
+    // The service now resolves mailboxes behind catch-all domains directly, so a
+    // catch-all address normally arrives already judged as valid or invalid and
+    // never reaches this branch. A residual 'catch_all' therefore no longer means
+    // "we don't inspect these" — it means this particular one could not be
+    // resolved, which is still risky rather than unknown. Disposable and
+    // role-based mailboxes are deliverable but a bad idea to send to.
     if (v === 'risky' || v === 'catch_all' || v === 'catch-all'
         || v === 'disposable' || v === 'role_based' || v === 'role') return 'risky';
     return 'unknown';
