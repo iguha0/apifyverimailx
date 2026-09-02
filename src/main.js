@@ -59,9 +59,10 @@ function mapResult(value) {
     const v = String(value ?? '').toLowerCase();
     if (v === 'valid') return 'valid';
     if (v === 'invalid') return 'invalid';
-    // The service now resolves mailboxes behind catch-all domains directly, so a
-    // catch-all address normally arrives already judged as valid or invalid and
-    // never reaches this branch. A residual 'catch_all' therefore no longer means
+    // The service now resolves mailboxes behind B2B catch-all domains directly, so
+    // such an address normally arrives already judged as valid or invalid and
+    // never reaches this branch. Consumer (B2C) catch-alls are out of scope and do
+    // still arrive here. A residual 'catch_all' therefore no longer means
     // "we don't inspect these" — it means this particular one could not be
     // resolved, which is still risky rather than unknown. Disposable and
     // role-based mailboxes are deliverable but a bad idea to send to.
