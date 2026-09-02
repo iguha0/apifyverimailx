@@ -19,7 +19,7 @@
             "overall": {
                 "type": "string",
                 "title": "Verdict",
-                "description": "valid = safe to send; invalid = will bounce; risky = catch-all, disposable or role mailbox; unknown = no determination; error = could not be checked",
+                "description": "valid = safe to send; invalid = will bounce; risky = disposable or role mailbox, or a catch-all address that could not be resolved; unknown = no determination; error = could not be checked",
                 "enum": [
                     "valid",
                     "invalid",
@@ -80,7 +80,7 @@
                     "null"
                 ],
                 "title": "Catch-all",
-                "description": "The domain accepts mail for any address, so this mailbox cannot be confirmed"
+                "description": "True only when the address sits behind a catch-all domain AND could not be resolved individually. Catch-all mailboxes are now verified directly, so most come back as a plain valid or invalid with this false."
             },
             "roleName": {
                 "type": [
