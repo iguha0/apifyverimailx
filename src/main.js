@@ -38,6 +38,29 @@ const CHARGE_EVENT = 'email-verified';
 const FREE_TIER_LIMIT = Number.parseInt(process.env.FREE_TIER_LIMIT ?? '', 10);
 const isFreeTier = Number.isInteger(FREE_TIER_LIMIT) && FREE_TIER_LIMIT > 0;
 
+// Where free-plan callers are sent instead.
+const FREE_ACTOR_URL = 'https://apify.com/cold_email_master/free-email-verifier';
+
+// Apify pays the developer only for runs started by users on a PAID plan — a
+// free-plan run still spends Verimailx credits and platform compute, so serving
+// one here is verification given away at a loss. The free edition of this same
+// code exists for exactly that audience, so free-plan callers are pointed at it
+// rather than quietly subsidised.
+//
+// Deliberately fails OPEN. APIFY_USER_IS_PAYING is documented only as "1 means
+// paying"; it is not promised to be present or to be "0" otherwise. Treating a
+// missing value as "not paying" would turn any platform change into an outage
+// that blocks paying customers — far more costly than letting the occasional
+// free run through. So this returns true only when the variable is present and
+// says something other than "1".
+function isFreePlanCaller() {
+    // The free edition IS the free path; it must never gate itself.
+    if (isFreeTier) return false;
+    const flag = process.env.APIFY_USER_IS_PAYING;
+    if (flag === undefined || flag === '') return false;
+    return flag !== '1';
+}
+
 // Cap on how much of a remote list file we will read (10 MB).
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -420,6 +443,25 @@ async function collectEmails(input) {
 
 async function main() {
     await Actor.init();
+
+    // Checked before anything else: no input read, no API call, no credits spent.
+    if (isFreePlanCaller()) {
+        log.warning('='.repeat(78));
+        log.warning('This Actor is available to users on a paid Apify plan.');
+        log.warning('Nothing was verified and nothing was charged.');
+        log.warning('');
+        log.warning('Free verification, same checks, up to 50 addresses per run:');
+        log.warning(FREE_ACTOR_URL);
+        log.warning('='.repeat(78));
+        // Exit SUCCEEDED with a status message rather than failing: this is a
+        // pricing boundary, not an error, and Apify counts failed runs against
+        // the Actor's quality score.
+        await Actor.exit(
+            'Requires a paid Apify plan. For free verification (50 addresses per run) use '
+            + 'apify.com/cold_email_master/free-email-verifier',
+        );
+        return;
+    }
 
     const apiKey = process.env[API_KEY_ENV];
     const hasApiKey = Boolean(apiKey);
