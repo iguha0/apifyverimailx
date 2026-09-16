@@ -2,6 +2,8 @@
 
 **Validate thousands of email addresses per run with 99.9% accuracy — at $0.30 per 1,000 validations, the cheapest email verification on the Apify marketplace.**
 
+> **Requires a paid Apify plan.** Free-plan runs exit straight away without verifying or charging anything. For free verification, use the [Free Email Verifier](https://apify.com/cold_email_master/free-email-verifier) — same checks, 50 addresses per run.
+
 Powered by [Verimailx](https://api.verimailx.com) and wrapped as a plug-and-play Apify Actor. No SMTP servers to maintain, no MX lookups to debug, no proxies to manage. Just hand it a list of emails, hit Run, and get a clean, structured verdict per address in your dataset.
 
 ---
@@ -128,6 +130,10 @@ One structured record per email, pushed to the run's default dataset. Export as 
 
 ## Pricing
 
+### Plan requirement
+
+Apify pays a developer only for runs started by users on a paid plan, while every run still costs real verification credits. Rather than quietly absorb that, this Actor checks the caller's plan before doing anything: a free-plan run stops immediately, verifies nothing, charges nothing, and finishes with a status message pointing to the free edition. No addresses are consumed and no partial results are produced.
+
 **$0.30 per 1,000 validations** — billed per email checked, not per run. Submit 47 emails, you pay for 47. Submit 12,000, you pay for 12,000.
 
 | Volume | Cost |
@@ -248,6 +254,10 @@ A: Yes — pass the scraper run's `datasetId` and the Actor reads the addresses 
 ---
 
 ## Changelog
+
+### 0.3.0 — Paid plan required
+- Runs started by users on a free Apify plan now exit immediately with a status message pointing to the [free edition](https://apify.com/cold_email_master/free-email-verifier), instead of verifying addresses the developer is never paid for. Nothing is verified and nothing is charged, and the run finishes as **succeeded** rather than failed, because this is a pricing boundary and not an error.
+- The check fails open: it treats a caller as free-plan only when the platform explicitly says so, so a missing or changed platform flag can never lock out paying customers.
 
 ### 0.2.0 — B2B catch-all addresses are now verified
 - The verification service resolves individual mailboxes behind **B2B** catch-all domains, so a real address on one now returns **`valid`** and a fake one returns **`invalid`**, instead of the whole domain being written off as `risky`. Consumer (B2C) catch-alls remain out of scope and still return `risky`; `catchAll` is true for anything that could not be resolved.
