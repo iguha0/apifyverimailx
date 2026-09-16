@@ -61,6 +61,43 @@ function isFreePlanCaller() {
     return flag !== '1';
 }
 
+// Classify the plan flag without deciding anything — purely for the log line.
+function planFlagState() {
+    const flag = process.env.APIFY_USER_IS_PAYING;
+    if (flag === undefined) return 'absent';
+    if (flag === '') return 'empty';
+    if (flag === '1') return 'paying';
+    return 'not-paying';
+}
+
+// The gate above fails open on a missing flag, and failing open is silent by
+// design — which makes two very different situations look identical from the
+// outside: "the gate ran and correctly let a paying customer through" and
+// "Apify stopped setting the variable, so the gate is now a no-op and every
+// free run is getting served again". This line is the only way to tell them
+// apart after the fact. Grep a run log for `plan-flag=` to see the raw value
+// the platform actually sent.
+//
+// Logged on every run, before the gate decides, so the record exists even for
+// runs that are allowed through.
+function logPlanFlag() {
+    const state = planFlagState();
+    const detail = `plan-flag=${state}`
+        + ` raw=${JSON.stringify(process.env.APIFY_USER_IS_PAYING ?? null)}`
+        + ` user=${process.env.APIFY_USER_ID ?? 'unknown'}`
+        + ` onPlatform=${process.env.APIFY_IS_AT_HOME === '1'}`
+        + ` edition=${isFreeTier ? 'free' : 'paid'}`;
+
+    // A run on the platform with no plan flag is the case worth noticing: the
+    // gate cannot do its job, so it warns rather than whispers. Off-platform
+    // (local/CLI) there is no flag to expect, so that stays at info level.
+    if ((state === 'absent' || state === 'empty') && process.env.APIFY_IS_AT_HOME === '1') {
+        log.warning(`Apify did not report the caller's plan — allowing the run. ${detail}`);
+    } else {
+        log.info(detail);
+    }
+}
+
 // Cap on how much of a remote list file we will read (10 MB).
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -443,6 +480,8 @@ async function collectEmails(input) {
 
 async function main() {
     await Actor.init();
+
+    logPlanFlag();
 
     // Checked before anything else: no input read, no API call, no credits spent.
     if (isFreePlanCaller()) {
