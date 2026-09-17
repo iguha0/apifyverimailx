@@ -47,18 +47,26 @@ const FREE_ACTOR_URL = 'https://apify.com/cold_email_master/free-email-verifier'
 // code exists for exactly that audience, so free-plan callers are pointed at it
 // rather than quietly subsidised.
 //
-// Deliberately fails OPEN. APIFY_USER_IS_PAYING is documented only as "1 means
-// paying"; it is not promised to be present or to be "0" otherwise. Treating a
-// missing value as "not paying" would turn any platform change into an outage
-// that blocks paying customers — far more costly than letting the occasional
-// free run through. So this returns true only when the variable is present and
-// says something other than "1".
+// Fails CLOSED: on the platform, only an explicit "1" gets served.
+//
+// This started out failing open — a missing APIFY_USER_IS_PAYING was allowed
+// through, on the reasoning that Apify only documents what "1" means and a
+// platform hiccup should not lock out paying customers. That reasoning was
+// wrong for two reasons. Apify's own docs now name this variable as THE way an
+// Actor learns the caller's plan (under limited permissions the /users/me
+// endpoint is blocked, and the SDK exposes it as Actor.getEnv().userIsPaying),
+// so it is a supported guarantee, not a hint. And the failure modes are not
+// symmetric in the dark: a wrongly blocked paying customer gets a message
+// naming the problem and writes in, while a wrongly served free run is silent
+// and simply costs money. Free verification stays available on the free Actor
+// either way, so nobody is left without a path.
 function isFreePlanCaller() {
     // The free edition IS the free path; it must never gate itself.
     if (isFreeTier) return false;
-    const flag = process.env.APIFY_USER_IS_PAYING;
-    if (flag === undefined || flag === '') return false;
-    return flag !== '1';
+    // Off the platform (local run, CLI, tests) there is no caller to check and
+    // no revenue to protect.
+    if (process.env.APIFY_IS_AT_HOME !== '1') return false;
+    return process.env.APIFY_USER_IS_PAYING !== '1';
 }
 
 // Classify the plan flag without deciding anything — purely for the log line.
@@ -89,10 +97,11 @@ function logPlanFlag() {
         + ` edition=${isFreeTier ? 'free' : 'paid'}`;
 
     // A run on the platform with no plan flag is the case worth noticing: the
-    // gate cannot do its job, so it warns rather than whispers. Off-platform
+    // gate now refuses it, so if the platform ever stops setting the variable
+    // this line is what explains a wave of turned-away customers. Off-platform
     // (local/CLI) there is no flag to expect, so that stays at info level.
     if ((state === 'absent' || state === 'empty') && process.env.APIFY_IS_AT_HOME === '1') {
-        log.warning(`Apify did not report the caller's plan — allowing the run. ${detail}`);
+        log.warning(`Apify did not report the caller's plan — refusing the run. ${detail}`);
     } else {
         log.info(detail);
     }
@@ -497,7 +506,9 @@ async function main() {
         // the Actor's quality score.
         await Actor.exit(
             'Requires a paid Apify plan. For free verification (50 addresses per run) use '
-            + 'apify.com/cold_email_master/free-email-verifier',
+            + 'apify.com/cold_email_master/free-email-verifier. On a paid plan and seeing '
+            + 'this? Report it through the Actor Issues tab — the log line starting '
+            + '"plan-flag=" says what the platform reported.',
         );
         return;
     }
